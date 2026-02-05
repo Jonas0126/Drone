@@ -40,7 +40,7 @@ memory:
 # https://skrl.readthedocs.io/en/latest/api/agents/ppo.html
 agent:
   class: PPO
-  rollouts: 24
+  rollouts: 16
   learning_epochs: 8
   mini_batches: 8
   discount_factor: 0.99
@@ -51,7 +51,7 @@ agent:
     kl_threshold: 0.008
   state_preprocessor: RunningStandardScaler
   state_preprocessor_kwargs: null
-  value_preprocessor: RunningStandardScaler
+  value_preprocessor: null
   value_preprocessor_kwargs: null
   random_timesteps: 0
   learning_starts: 0
@@ -68,8 +68,8 @@ agent:
   experiment:
     directory: "drone_obstacle_avoidance_train"
     experiment_name: ""
-    write_interval: 5000
-    checkpoint_interval: 5000
+    write_interval: 2000
+    checkpoint_interval: 2000
 
 
 # Sequential trainer
@@ -78,3 +78,4 @@ trainer:
   class: SequentialTrainer
   timesteps: 10000000
   environment_info: log
+  disable_progressbar: True
