@@ -51,3 +51,15 @@ gym.register(
         "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_train_cfg.yaml",
     },
 )
+
+# Fixed curriculum-level evaluation environments (0~5 obstacles)
+for level in range(6):
+    gym.register(
+        id=f"Drone-Direct-Advanced-Level{level}-Test-v0",
+        entry_point=f"{__name__}.drone_env_advanced_test:DroneTrainTestEnv",
+        disable_env_checker=True,
+        kwargs={
+            "env_cfg_entry_point": f"{__name__}.drone_env_advanced_cfg:DroneTrainLevel{level}EnvCfg",
+            "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_train_cfg.yaml",
+        },
+    )

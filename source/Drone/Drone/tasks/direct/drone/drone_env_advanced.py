@@ -25,8 +25,8 @@ class DroneTrainEnv(DroneEnv):
 
     cfg: DroneTrainEnvCfg
 
-    # 方塊數量（固定使用 3 個作為阻隔）
-    _BARRIER_BLOCKS = 3
+    # 方塊數量上限（最高難度 5 個阻隔）
+    _BARRIER_BLOCKS = 5
     # 生成點高度（避免上下生成）
     _SPAWN_Z = 2.0
     # 生成範圍（local XY）
@@ -96,6 +96,8 @@ class DroneTrainEnv(DroneEnv):
         """
         cfg.debug_vis = bool(getattr(cfg, "show_goal_marker", False))
         super().__init__(cfg, render_mode, **kwargs)
+        self._term_success = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        self._success_episodes_total = 0
 
     def _get_observations(self) -> dict:
         """產生觀測向量（含四方向深度相機特徵）。
@@ -148,6 +150,66 @@ class DroneTrainEnv(DroneEnv):
 
         return observations
 
+    def _get_rewards(self) -> torch.Tensor:
+        """計算獎勵：進度 + 平穩飛行 + 姿態直立 + 控制成本。"""
+        pos_w = self._robot.data.root_pos_w
+        d = torch.linalg.norm(self._desired_pos_w - pos_w, dim=1)
+
+        progress = torch.clamp(self._prev_distance - d, -1.0, 1.0)
+        r_progress = self.cfg.reward_progress_scale * progress
+        r_time = -self.cfg.reward_time_penalty * self.step_dt
+
+        lin_v = torch.linalg.norm(self._robot.data.root_lin_vel_b, dim=1)
+        ang_v = torch.linalg.norm(self._robot.data.root_ang_vel_b, dim=1)
+        r_lin_vel = -self.cfg.reward_lin_vel_scale * lin_v
+        r_ang_vel = -self.cfg.reward_ang_vel_scale * ang_v
+
+        gravity_b = self._robot.data.projected_gravity_b
+        tilt = torch.linalg.norm(gravity_b[:, :2], dim=1)
+        r_tilt = -self.cfg.reward_tilt_scale * tilt
+
+        r_ctrl = -self.cfg.reward_ctrl_scale * torch.sum(self._actions ** 2, dim=1)
+
+        near_goal = d < self.cfg.goal_radius
+        stable = (lin_v < self.cfg.stable_lin_vel) & (ang_v < self.cfg.stable_ang_vel)
+        r_hover = torch.zeros_like(d)
+        r_hover[near_goal] = self.cfg.reward_hover_scale * torch.exp(-2.0 * lin_v[near_goal] ** 2)
+        r_hover[near_goal & stable] += 0.3
+
+        reward = r_progress + r_time + r_lin_vel + r_ang_vel + r_tilt + r_ctrl + r_hover
+
+        self._prev_distance = d.detach()
+        self._episode_sums["distance_to_goal"] += r_progress
+        self._episode_sums["lin_vel"] += lin_v
+        self._episode_sums["ang_vel"] += ang_v
+
+        return reward
+
+    def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """終止條件：碰撞、過低/過高、過遠、成功或超時。"""
+        time_out = self.episode_length_buf >= self.max_episode_length - 1
+
+        z = self._robot.data.root_pos_w[:, 2]
+        died = (z < self.cfg.reset_min_height) | (z > self.cfg.reset_max_height)
+
+        hit = self._check_drone_block_hits()
+
+        d = torch.linalg.norm(self._desired_pos_w - self._robot.data.root_pos_w, dim=1)
+
+        lin_v = torch.linalg.norm(self._robot.data.root_lin_vel_b, dim=1)
+        ang_v = torch.linalg.norm(self._robot.data.root_ang_vel_b, dim=1)
+        near_goal = d < self.cfg.goal_radius
+        stable = (lin_v < self.cfg.stable_lin_vel) & (ang_v < self.cfg.stable_ang_vel)
+
+        success_step = near_goal & stable
+        self._hover_count[success_step] += 1
+        self._hover_count[~success_step] = 0
+        success = self._hover_count >= self.cfg.hover_hold_steps
+        self._term_success = success
+
+        terminated = hit | died | success
+        return terminated, time_out
+
     def _compute_desired_pos_b(self):
         """計算目標在機體座標系的位置。
 
@@ -191,9 +253,21 @@ class DroneTrainEnv(DroneEnv):
         extras = {
             "Episode_Termination/died": torch.count_nonzero(self.reset_terminated[env_ids]).item(),
             "Episode_Termination/time_out": torch.count_nonzero(self.reset_time_outs[env_ids]).item(),
+            "Episode_Termination/success": torch.count_nonzero(self._term_success[env_ids]).item(),
             "Metrics/final_distance_to_goal": final_distance_to_goal.item(),
         }
         self.extras["log"].update(extras)
+        # if getattr(self.cfg, "debug_vis", False):
+        #     print(
+        #         "[TEST] Termination counts:",
+        #         {
+        #             "died": extras["Episode_Termination/died"],
+        #             "time_out": extras["Episode_Termination/time_out"],
+        #             "success": extras["Episode_Termination/success"],
+        #         },
+        #     )
+        self._success_episodes_total += int(torch.count_nonzero(self._term_success[env_ids]).item())
+        self._term_success[env_ids] = False
 
         # standard reset flow
         self._robot.reset(env_ids)
@@ -353,7 +427,9 @@ class DroneTrainEnv(DroneEnv):
         Returns:
             list[int]: 選中的方塊索引。
         """
-        count = min(self._BARRIER_BLOCKS, total_blocks)
+        curriculum_level = int(getattr(self.cfg, "curriculum_level", self._BARRIER_BLOCKS))
+        curriculum_level = max(0, min(self._BARRIER_BLOCKS, curriculum_level))
+        count = min(curriculum_level, total_blocks)
         if count <= 0:
             return []
 

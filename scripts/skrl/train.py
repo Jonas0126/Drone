@@ -12,6 +12,9 @@ a more user-friendly way.
 
 """Launch Isaac Sim Simulator first."""
 
+import os
+os.environ["TQDM_DISABLE"] = "1"
+os.environ["RICH_DISABLE"] = "1"
 import argparse
 import sys
 
@@ -59,6 +62,13 @@ parser.add_argument(
 )
 parser.add_argument("--debug_cam", action="store_true", default=False, help="Enable debug depth camera capture mode.")
 parser.add_argument("--debug_collision", action="store_true", default=False, help="Enable debug collision mode.")
+parser.add_argument(
+    "--curriculum-level",
+    type=int,
+    default=None,
+    choices=[0, 1, 2, 3, 4, 5],
+    help="Obstacle curriculum level (0: none ... 5: five obstacles).",
+)
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 # parse the arguments
@@ -123,6 +133,8 @@ logger = logging.getLogger(__name__)
 
 import Drone.tasks  # noqa: F401
 
+
+
 # config shortcuts
 if args_cli.agent is None:
     algorithm = args_cli.algorithm.lower()
@@ -140,6 +152,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
     env_cfg.debug_cam = args_cli.debug_cam
     env_cfg.debug_collision = args_cli.debug_collision
+    if args_cli.curriculum_level is not None and hasattr(env_cfg, "curriculum_level"):
+        env_cfg.curriculum_level = args_cli.curriculum_level
+        print(f"[INFO] Curriculum obstacle level: {env_cfg.curriculum_level}")
 
     # check for invalid combination of CPU device with distributed training
     if args_cli.distributed and args_cli.device is not None and "cpu" in args_cli.device:
