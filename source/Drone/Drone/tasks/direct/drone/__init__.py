@@ -49,8 +49,8 @@ gym.register(
     kwargs={
         "env_cfg_entry_point": f"{__name__}.drone_env_advanced_cfg:DroneTrainEnvCfg",
         "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_train_cfg.yaml",
-    },
-)
+        },
+    )
 
 # Fixed curriculum-level evaluation environments (0~5 obstacles)
 for level in range(6):
@@ -63,3 +63,23 @@ for level in range(6):
             "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_train_cfg.yaml",
         },
     )
+
+gym.register(
+    id="Drone-Direct-Target-Touch-v0",
+    entry_point=f"{__name__}.drone_env_target_touch:DroneTargetTouchEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.drone_env_target_touch_cfg:DroneTargetTouchEnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_target_touch_cfg.yaml",
+    },
+)
+
+gym.register(
+    id="Drone-Direct-Target-Touch-Test-v0",
+    entry_point=f"{__name__}.drone_env_target_touch:DroneTargetTouchTestEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.drone_env_target_touch_cfg:DroneTargetTouchEnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_target_touch_cfg.yaml",
+    },
+)
