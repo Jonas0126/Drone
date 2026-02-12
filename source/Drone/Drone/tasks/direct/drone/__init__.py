@@ -83,3 +83,43 @@ gym.register(
         "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_target_touch_cfg.yaml",
     },
 )
+
+gym.register(
+    id="Drone-Direct-Target-Touch-Moving-v0",
+    entry_point=f"{__name__}.drone_env_target_touch_moving:DroneTargetTouchMovingEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.drone_env_target_touch_moving_cfg:DroneTargetTouchMovingEnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_target_touch_moving_cfg.yaml",
+    },
+)
+
+gym.register(
+    id="Drone-Direct-Target-Touch-Moving-Test-v0",
+    entry_point=f"{__name__}.drone_env_target_touch_moving:DroneTargetTouchMovingTestEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.drone_env_target_touch_moving_cfg:DroneTargetTouchMovingEnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_target_touch_moving_cfg.yaml",
+    },
+)
+
+gym.register(
+    id="Drone-Direct-Target-Touch-Moving-Fast-v0",
+    entry_point=f"{__name__}.drone_env_target_touch_moving:DroneTargetTouchMovingEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.drone_env_target_touch_moving_fast_cfg:DroneTargetTouchMovingFastEnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_target_touch_moving_fast_cfg.yaml",
+    },
+)
+
+gym.register(
+    id="Drone-Direct-Target-Touch-Moving-Fast-Test-v0",
+    entry_point=f"{__name__}.drone_env_target_touch_moving:DroneTargetTouchMovingTestEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.drone_env_target_touch_moving_fast_cfg:DroneTargetTouchMovingFastEnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_target_touch_moving_fast_cfg.yaml",
+    },
+)

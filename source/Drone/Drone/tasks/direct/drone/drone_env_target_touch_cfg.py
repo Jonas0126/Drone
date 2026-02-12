@@ -36,7 +36,7 @@ class DroneTargetTouchEnvWindow(BaseEnvWindow):
 @configclass
 class DroneTargetTouchEnvCfg(DirectRLEnvCfg):
     # env
-    episode_length_s = 10.0
+    episode_length_s = 30.0
     decimation = 2
     action_space = 4
     observation_space = 12
@@ -82,6 +82,30 @@ class DroneTargetTouchEnvCfg(DirectRLEnvCfg):
     moment_scale = 0.05
 
     # reward scales
-    lin_vel_reward_scale = -0.05
-    ang_vel_reward_scale = -0.01
-    distance_to_goal_reward_scale = 15.0
+    lin_vel_reward_scale = 0.0
+    ang_vel_reward_scale = -0.002
+    distance_to_goal_reward_scale = 26.0
+    touch_bonus_reward = 70.0
+    time_penalty_scale = 0.15
+    distance_penalty_scale = 0.3
+    death_penalty = 80.0
+    far_away_termination_distance = 20.0
+
+    # touch-task controls
+    touch_radius = 0.48
+    enable_touch_reward = True
+    terminate_on_touch = True
+    near_touch_outer_radius = 0.75
+    near_touch_hover_speed_threshold = 0.12
+    near_touch_vel_penalty_min_scale = 0.2
+
+    # spawn ranges (relative to env origin)
+    spawn_xy_min = -5.0
+    spawn_xy_max = 5.0
+    spawn_z_min = 1.0
+    spawn_z_max = 5.0
+
+    # hover curriculum (spawn range stages)
+    curriculum_enabled = True
+    curriculum_ramp_steps = 320_000
+    curriculum_spawn_max_stages = (2.0, 4.0, 7.0)
