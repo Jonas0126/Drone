@@ -73,7 +73,7 @@ class DroneTargetTouchEnvCfg(DirectRLEnvCfg):
 
     # scene
     scene: InteractiveSceneCfg = InteractiveSceneCfg(
-        num_envs=4096, env_spacing=8, replicate_physics=True, clone_in_fabric=True
+        num_envs=8192, env_spacing=8, replicate_physics=True, clone_in_fabric=True
     )
 
     # robot
@@ -84,11 +84,11 @@ class DroneTargetTouchEnvCfg(DirectRLEnvCfg):
     # reward scales
     lin_vel_reward_scale = 0.0
     ang_vel_reward_scale = -0.002
-    distance_to_goal_reward_scale = 26.0
+    distance_to_goal_reward_scale = 18.0
     touch_bonus_reward = 70.0
     time_penalty_scale = 0.15
-    distance_penalty_scale = 0.3
-    death_penalty = 80.0
+    distance_penalty_scale = 0.2
+    death_penalty = 30.0
     far_away_termination_distance = 20.0
 
     # touch-task controls
@@ -107,5 +107,6 @@ class DroneTargetTouchEnvCfg(DirectRLEnvCfg):
 
     # hover curriculum (spawn range stages)
     curriculum_enabled = True
-    curriculum_ramp_steps = 320_000
-    curriculum_spawn_max_stages = (2.0, 4.0, 7.0)
+    curriculum_spawn_z_max_start = 2.5
+    curriculum_spawn_z_max_end = 5.0
+    curriculum_ramp_steps = 1_600_000

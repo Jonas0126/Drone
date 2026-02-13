@@ -247,22 +247,27 @@ class DroneTargetTouchEnv(DirectRLEnv):
         if getattr(self.cfg, "curriculum_enabled", False):
             self._curriculum_step += int(len(env_ids))
             ramp = max(1, int(getattr(self.cfg, "curriculum_ramp_steps", 1)))
-            stages = list(getattr(self.cfg, "curriculum_spawn_max_stages", (spawn_z_max,)))
             frac = min(float(self._curriculum_step) / float(ramp), 1.0)
-            stage_idx = min(int(frac * len(stages)), len(stages) - 1)
-            if not hasattr(self, "_curriculum_stage_idx"):
-                self._curriculum_stage_idx = -1
-            if stage_idx != self._curriculum_stage_idx:
-                self._curriculum_stage_idx = stage_idx
-                stage_max = float(stages[stage_idx])
-                print(
-                    f"[CURRICULUM][Touch] stage={stage_idx + 1}/{len(stages)} "
-                    f"spawn_range=1~{stage_max}m",
-                    flush=True,
-                )
-            spawn_z_max = max(float(stages[stage_idx]), float(self.cfg.spawn_z_min))
-            spawn_xy_min = -float(stages[stage_idx])
-            spawn_xy_max = float(stages[stage_idx])
+            if hasattr(self.cfg, "curriculum_spawn_z_max_start") and hasattr(self.cfg, "curriculum_spawn_z_max_end"):
+                start = float(getattr(self.cfg, "curriculum_spawn_z_max_start"))
+                end = float(getattr(self.cfg, "curriculum_spawn_z_max_end"))
+                spawn_z_max = max(float(self.cfg.spawn_z_min), start + (end - start) * frac)
+            else:
+                stages = list(getattr(self.cfg, "curriculum_spawn_max_stages", (spawn_z_max,)))
+                stage_idx = min(int(frac * len(stages)), len(stages) - 1)
+                if not hasattr(self, "_curriculum_stage_idx"):
+                    self._curriculum_stage_idx = -1
+                if stage_idx != self._curriculum_stage_idx:
+                    self._curriculum_stage_idx = stage_idx
+                    stage_max = float(stages[stage_idx])
+                    print(
+                        f"[CURRICULUM][Touch] stage={stage_idx + 1}/{len(stages)} "
+                        f"spawn_range=1~{stage_max}m",
+                        flush=True,
+                    )
+                spawn_z_max = max(float(stages[stage_idx]), float(self.cfg.spawn_z_min))
+                spawn_xy_min = -float(stages[stage_idx])
+                spawn_xy_max = float(stages[stage_idx])
         spawn_xy = torch.empty(
             (len(env_ids), 2),
             device=default_root_state.device,
