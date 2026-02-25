@@ -1,4 +1,5 @@
 from __future__ import annotations
+# 中文說明：此檔案為無人機任務環境/設定實作，包含觀測、獎勵、終止與重置等核心邏輯。
 
 from isaaclab.utils import configclass
 
@@ -14,12 +15,12 @@ class DroneTargetTouchMovingFastEnvCfg(DroneTargetTouchMovingEnvCfg):
     - 其餘獎勵與限制沿用上一階段，降低分佈跳變。
     """
 
-    # 相較 Moving 階段 (0.35 m/s) 提升為 2 倍。
-    moving_target_speed = 0.7
+    # Align with current Moving stage speed.
+    moving_target_speed = 2.0
 
     # 只在 Fast 階段移除速度懲罰。
     lin_vel_reward_scale = 0.0
     ang_vel_reward_scale = -0.002
 
-    # Fast 階段加重時間懲罰，進一步鼓勵更快完成碰觸。
-    time_penalty_scale = 0.35
+    # Align reward shaping with hover baseline; keep only target-speed increase.
+    time_penalty_scale = 0.15

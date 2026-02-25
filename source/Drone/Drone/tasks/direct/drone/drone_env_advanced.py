@@ -1,4 +1,5 @@
 # Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# 中文說明：此檔案為無人機任務環境/設定實作，包含觀測、獎勵、終止與重置等核心邏輯。
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -236,7 +237,7 @@ class DroneTrainEnv(DroneEnv):
         if env_ids is None or len(env_ids) == self.num_envs:
             env_ids = self._robot._ALL_INDICES
 
-        # Logging
+        # 回合統計紀錄
         final_distance_to_goal = torch.linalg.norm(
             self._desired_pos_w[env_ids] - self._robot.data.root_pos_w[env_ids], dim=1
         ).mean()
@@ -269,21 +270,21 @@ class DroneTrainEnv(DroneEnv):
         self._success_episodes_total += int(torch.count_nonzero(self._term_success[env_ids]).item())
         self._term_success[env_ids] = False
 
-        # standard reset flow
+        # 標準重置流程
         self._robot.reset(env_ids)
         super()._reset_idx(env_ids)
 
         self._actions[env_ids] = 0.0
 
-        # Reset robot state
+        # 重置機體狀態
         joint_pos = self._robot.data.default_joint_pos[env_ids]
         joint_vel = self._robot.data.default_joint_vel[env_ids]
         default_root_state = self._robot.data.default_root_state[env_ids].clone()
 
-        # base env origin
+        # 目前環境原點
         default_root_state[:, :3] += self._terrain.env_origins[env_ids]
 
-        # generate barrier blocks and spawn/goal
+        # 生成阻隔方塊與 spawn/goal
         env_ids_list = env_ids.tolist() if isinstance(env_ids, torch.Tensor) else list(env_ids)
         for batch_idx, env_id in enumerate(env_ids_list):
             spawn_local, goal_local = self._pick_far_spawn_goal()

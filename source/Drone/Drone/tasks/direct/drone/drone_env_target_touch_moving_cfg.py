@@ -1,4 +1,5 @@
 from __future__ import annotations
+# 中文說明：此檔案為無人機任務環境/設定實作，包含觀測、獎勵、終止與重置等核心邏輯。
 
 from isaaclab.utils import configclass
 
@@ -26,20 +27,24 @@ class DroneTargetTouchMovingEnvCfg(DroneTargetTouchEnvCfg):
 
     ui_window_class_type = DroneTargetTouchEnvWindow
 
-    # moving stage uses fixed spawn range (no hover curriculum)
+    # Disable spawn curriculum in moving stages; keep it only in static touch stage.
     curriculum_enabled = False
 
     # Moving 階段保留速度懲罰，避免追逐過程過度發散。
     lin_vel_reward_scale = 0.0
     ang_vel_reward_scale = -0.002
+    approach_reward_scale = 1.0
 
-    # 提高時間懲罰與近目標懸停懲罰，鼓勵更快完成碰觸。
-    time_penalty_scale = 0.25
+    # Align reward shaping with hover baseline; moving difficulty comes from target motion.
+    time_penalty_scale = 0.15
 
     # 目標移動設定：慢速直線移動（方向由環境動態計算）。
-    moving_target_speed = 0.35  # m/s
+    moving_target_speed = 1.0  # m/s
     # Z 方向縮放：控制目標「往上/往下」分量占比，避免垂直移動過大。
     moving_target_vertical_dir_scale = 0.6
+    # Keep baseline moving behavior unchanged; ladder stages can override these.
+    moving_target_turn_rate_limit = 0.0
+    moving_target_no_instant_reverse = False
     moving_target_z_wave_amplitude = 0.2  # m/s
     moving_target_z_wave_period_s = 8.0
 

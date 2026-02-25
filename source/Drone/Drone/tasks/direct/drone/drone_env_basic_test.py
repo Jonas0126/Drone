@@ -1,4 +1,5 @@
 # Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# 中文說明：此檔案為無人機任務環境/設定實作，包含觀測、獎勵、終止與重置等核心邏輯。
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -51,7 +52,7 @@ class DroneTestEnv(DroneEnv):
         if env_ids is None or len(env_ids) == self.num_envs:
             env_ids = self._robot._ALL_INDICES
 
-        # Logging
+        # 回合統計紀錄
         final_distance_to_goal = torch.linalg.norm(
             self._desired_pos_w[env_ids] - self._robot.data.root_pos_w[env_ids], dim=1
         ).mean()
@@ -72,7 +73,7 @@ class DroneTestEnv(DroneEnv):
         }
         self.extras["log"].update(extras)
 
-        # standard reset flow
+        # 標準重置流程
         self._robot.reset(env_ids)
         super()._reset_idx(env_ids)
 
@@ -88,15 +89,15 @@ class DroneTestEnv(DroneEnv):
             for env_id in reset_env_ids:
                 self._debug_block_mesh_cache.pop(env_id, None)
 
-        # Reset robot state
+        # 重置機體狀態
         joint_pos = self._robot.data.default_joint_pos[env_ids]
         joint_vel = self._robot.data.default_joint_vel[env_ids]
         default_root_state = self._robot.data.default_root_state[env_ids].clone()
 
-        # base env origin
+        # 目前環境原點
         default_root_state[:, :3] += self._terrain.env_origins[env_ids]
 
-        # reset blocks and record positions (fixed)
+        # 重置方塊到固定位置，並記錄其座標
         self._reset_blocks_position(
             env_ids,
             x_range=(0, 10.0),
@@ -104,7 +105,7 @@ class DroneTestEnv(DroneEnv):
             z_range=(0.5, 8.0),
         )
 
-        # spawn/goal near farthest two blocks, with the middle block between them
+        # 在最遠兩個方塊附近設置 spawn/goal，讓中間方塊形成阻隔
         env_ids_list = env_ids.tolist() if isinstance(env_ids, torch.Tensor) else list(env_ids)
         for batch_idx, env_id in enumerate(env_ids_list):
             tri = self._tri_block_indices[env_id]
@@ -115,12 +116,12 @@ class DroneTestEnv(DroneEnv):
             if len(indices) < 2:
                 continue
 
-            # collect world positions
+            # 收集方塊世界座標
             positions = {idx: self._block_world_pos.get((env_id, idx)) for idx in indices}
             if any(p is None for p in positions.values()):
                 continue
 
-            # find farthest pair
+            # 找出最遠方塊配對
             far_a, far_b = indices[0], indices[1]
             far_dist = -1.0
             for i in range(len(indices)):
@@ -132,7 +133,7 @@ class DroneTestEnv(DroneEnv):
                         far_dist = d
                         far_a, far_b = indices[i], indices[j]
 
-            # remaining index is the middle block
+            # 剩下的索引即中間方塊
             mid = next(idx for idx in indices if idx not in (far_a, far_b))
 
             pos_a = positions[far_a]
@@ -237,7 +238,7 @@ class DroneTestEnv(DroneEnv):
 
                 translate_op.Set(Gf.Vec3f(x, y, z))
 
-                # keep a python-side world-position cache in sync
+                # 同步 Python 端世界座標快取
                 self._block_world_pos[(env_id, block_idx)] = Gf.Vec3d(
                     float(env_origin[0] + x),
                     float(env_origin[1] + y),

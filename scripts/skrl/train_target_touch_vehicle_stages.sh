@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 多階段串接訓練：
-# 1) Drone-Direct-Target-Touch-v0
-# 2) Drone-Direct-Target-Touch-Moving-v0
-# 3) Drone-Direct-Target-Touch-Moving-Fast-v0
+# Vehicle 系列多階段訓練：
+# 1) Drone-Direct-Target-Touch-Vehicle-v0
+# 2) Drone-Direct-Target-Touch-Vehicle-Faster-v0
+# 3) Drone-Direct-Target-Touch-Vehicle-VeryFast-v0
+# 4) Drone-Direct-Target-Touch-Vehicle-UltraFast-v0
 #
 # 用法：
-#   bash scripts/skrl/train_target_touch_stages.sh --headless --device cuda:0
-#   bash scripts/skrl/train_target_touch_stages.sh --headless --num_envs 2048 --max_iterations 2000
+#   bash scripts/skrl/train_target_touch_vehicle_stages.sh --headless --device cuda:0
+#   bash scripts/skrl/train_target_touch_vehicle_stages.sh --headless --num_envs 2048 --max_iterations 2000
 #
 # 備註：
 # - 傳入的參數會套用到所有階段。
@@ -32,7 +33,7 @@ if [[ ${HAS_NUM_ENVS_FLAG} -eq 0 ]]; then
   COMMON_ARGS+=(--num_envs 8192)
 fi
 
-# 預設 headless；若使用者已傳入 --headless 或明確關閉/啟用 GUI 參數，則尊重使用者設定。
+# 預設 headless；若使用者已傳入 --headless，則尊重使用者設定。
 HAS_HEADLESS_FLAG=0
 for arg in "${COMMON_ARGS[@]}"; do
   if [[ "${arg}" == "--headless" || "${arg}" == --headless=* ]]; then
@@ -45,21 +46,24 @@ if [[ ${HAS_HEADLESS_FLAG} -eq 0 ]]; then
 fi
 
 STAGE_NAMES=(
-  "Stage-1 Static Touch"
-  "Stage-2 Moving Touch"
-  "Stage-3 Fast Moving Touch"
+  "Stage-1 Vehicle Touch"
+  "Stage-2 Vehicle Faster"
+  "Stage-3 Vehicle VeryFast"
+  "Stage-4 Vehicle UltraFast"
 )
 
 STAGE_TASKS=(
-  "Drone-Direct-Target-Touch-v0"
-  "Drone-Direct-Target-Touch-Moving-v0"
-  "Drone-Direct-Target-Touch-Moving-Fast-v0"
+  "Drone-Direct-Target-Touch-Vehicle-v0"
+  "Drone-Direct-Target-Touch-Vehicle-Faster-v0"
+  "Drone-Direct-Target-Touch-Vehicle-VeryFast-v0"
+  "Drone-Direct-Target-Touch-Vehicle-UltraFast-v0"
 )
 
 STAGE_EXP_DIRS=(
-  "drone_target_touch_hover_baseline"
-  "drone_target_touch_moving"
-  "drone_target_touch_moving_fast"
+  "drone_target_touch_vehicle"
+  "drone_target_touch_vehicle_faster"
+  "drone_target_touch_vehicle_veryfast"
+  "drone_target_touch_vehicle_ultrafast"
 )
 
 find_latest_checkpoint() {
@@ -138,5 +142,5 @@ for i in "${!STAGE_TASKS[@]}"; do
 done
 
 echo
-echo "[DONE] All stages completed."
+echo "[DONE] Vehicle stages completed."
 echo "[DONE] Final checkpoint: ${final_ckpt}"

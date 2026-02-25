@@ -1,4 +1,5 @@
 # Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# 中文說明：此檔案為無人機任務環境/設定實作，包含觀測、獎勵、終止與重置等核心邏輯。
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -14,18 +15,18 @@ from .drone_env_advanced_cfg import DroneTrainEnvCfg
 
 
 class DroneTrainTestEnv(DroneTrainEnv):
-    """Deterministic evaluation map for curriculum levels.
+    """課程關卡用可重現測試地圖。
 
-    - Fixed spawn/goal every episode
-    - Obstacles are deterministically placed between spawn and goal
-    - Obstacle count follows cfg.curriculum_level (0~5)
+    - 每個 episode 使用固定 spawn/goal
+    - 障礙物以可重現規則放在路徑中間
+    - 障礙物數量由 cfg.curriculum_level（0~5）控制
     """
 
-    # Keep distance within max_goal_distance (15.0) to avoid instant too_far termination.
+    # 固定 spawn/goal 距離控制在 max_goal_distance（15.0）內，避免開局立即 too_far 終止。
     _TEST_SPAWN_LOCAL = (2.0, 2.0, 2.0)
     _TEST_GOAL_LOCAL = (12.0, 12.0, 2.0)
 
-    # Evenly spread on the path (center region) and alternate lateral offset
+    # 沿路徑中心等距分布，並交替使用左右側偏移。
     _BARRIER_T_SEQ = (0.26, 0.38, 0.50, 0.64, 0.78)
     _BARRIER_OFFSETS = (0.0, 2.2, -2.2, 4.0, -4.0, 5.2, -5.2)
     _BARRIER_XY_CLEARANCE = 0.20
@@ -35,11 +36,11 @@ class DroneTrainTestEnv(DroneTrainEnv):
         super().__init__(cfg, render_mode, **kwargs)
 
     def _pick_far_spawn_goal(self) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
-        """Fixed spawn/goal for stable and comparable testing."""
+        """回傳固定 spawn/goal，便於穩定且可比較的測試。"""
         return self._TEST_SPAWN_LOCAL, self._TEST_GOAL_LOCAL
 
     def _select_barrier_indices(self, total_blocks: int) -> list[int]:
-        """Deterministic active block indices based on curriculum level."""
+        """依課程等級決定啟用障礙物索引（可重現）。"""
         count = max(0, min(int(getattr(self.cfg, "curriculum_level", 0)), self._BARRIER_BLOCKS))
         count = min(count, total_blocks)
         return list(range(count))
@@ -50,7 +51,7 @@ class DroneTrainTestEnv(DroneTrainEnv):
         spawn_local: tuple[float, float, float],
         goal_local: tuple[float, float, float],
     ) -> None:
-        """Place blocks deterministically between spawn and goal, not too dense."""
+        """在 spawn 與 goal 之間可重現地放置障礙物，並盡量避免過密重疊。"""
         self._ensure_block_cache(env_id)
         blocks = self._blocks_per_env[env_id]
         if not blocks:
@@ -89,8 +90,7 @@ class DroneTrainTestEnv(DroneTrainEnv):
                 t = self._BARRIER_T_SEQ[min(order, len(self._BARRIER_T_SEQ) - 1)]
                 base = self._BARRIER_OFFSETS[min(order, len(self._BARRIER_OFFSETS) - 1)]
 
-                # Try multiple lateral offsets and pick the first non-overlapping one.
-                # This prevents small blocks from being buried inside large ones.
+                # 嘗試多個側向偏移，選擇第一個不重疊位置，避免小方塊埋在大方塊內。
                 candidates = [base] + [off for off in self._BARRIER_OFFSETS if off != base]
                 found = False
                 bx, by = 0.0, 0.0
@@ -106,7 +106,7 @@ class DroneTrainTestEnv(DroneTrainEnv):
                         found = True
                         break
 
-                # If no safe spot is found, hide this obstacle instead of allowing overlap.
+                # 若找不到安全位置，直接隱藏該障礙，避免重疊穿模。
                 if found:
                     bz = self._SPAWN_Z
                     placed_active.append((block_idx, bx, by))
@@ -133,7 +133,7 @@ class DroneTrainTestEnv(DroneTrainEnv):
         bx: float,
         by: float,
     ) -> bool:
-        """Check XY AABB overlap in local coordinates with a small clearance."""
+        """在 local 座標下檢查 XY 平面 AABB 是否重疊（含少量安全間隙）。"""
         self._ensure_block_cache(env_id)
         if (
             env_id >= len(self._block_local_aabb)

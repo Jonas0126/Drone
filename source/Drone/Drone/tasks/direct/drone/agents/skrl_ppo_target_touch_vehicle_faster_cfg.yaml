@@ -56,7 +56,7 @@ agent:
   rewards_shaper_scale: 0.1
   time_limit_bootstrap: False
   experiment:
-    directory: "drone_target_touch_moving_ultrafast"
+    directory: "drone_target_touch_vehicle_faster"
     experiment_name: ""
     write_interval: auto
     checkpoint_interval: auto
