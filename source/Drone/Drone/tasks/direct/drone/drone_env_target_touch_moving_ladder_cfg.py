@@ -10,13 +10,20 @@ from .drone_env_target_touch_moving_fast_cfg import DroneTargetTouchMovingFastEn
 class DroneTargetTouchMovingFasterEnvCfg(DroneTargetTouchMovingFastEnvCfg):
     """速度階梯第 2 階：比 Fast 更快。"""
 
+    # 每回合上限（秒）。
     episode_length_s = 30.0
+    # 目標速度（m/s）。
     moving_target_speed = 5.0
+    # 單步最大轉向角速度上限（rad/s）。
     moving_target_turn_rate_limit = 1.2
+    # 禁止瞬間反向，讓運動更平滑可預測。
     moving_target_no_instant_reverse = True
+    # 重生目標距離範圍（相對無人機出生點）。
     target_spawn_distance_min = 20.0
     target_spawn_distance_max = 50.0
+    # 取消 far-away 終止（以極大距離近似關閉）。
     far_away_termination_distance = 1_000_000.0
+    # 啟用接地終止與接地邊界。
     terminate_on_ground_contact = True
     ground_contact_body_margin = 0.05
 

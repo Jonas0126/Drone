@@ -15,10 +15,10 @@ class DroneTargetTouchMovingFastEnvCfg(DroneTargetTouchMovingEnvCfg):
     - 其餘獎勵與限制沿用上一階段，降低分佈跳變。
     """
 
-    # Align with current Moving stage speed.
+    # 目標移動速度（m/s）：由 Moving 基準再上調。
     moving_target_speed = 2.0
 
-    # 只在 Fast 階段移除速度懲罰。
+    # 只在 Fast 階段調整速度/角速度懲罰強度。
     lin_vel_reward_scale = 0.0
     ang_vel_reward_scale = -0.002
 

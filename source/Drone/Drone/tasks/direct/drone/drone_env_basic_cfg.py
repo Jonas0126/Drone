@@ -80,7 +80,8 @@ class DroneEnvCfg(DirectRLEnvCfg):
     thrust_to_weight = 2.5
     moment_scale = 0.05
 
-    # 深度相機
+    # 深度相機（前/後/左/右），輸出 distance_to_image_plane。
+    # update_period=2 代表每 2 個模擬步更新一次感測資料。
     depth_cam_front: TiledCameraCfg = TiledCameraCfg(
         prim_path="/World/envs/env_.*/Robot/body/depth_cam_front",
         update_period=2,
@@ -158,11 +159,17 @@ class DroneEnvCfg(DirectRLEnvCfg):
     )
 
     # 獎勵超參數（DroneEnv 內使用）
+    # reward_progress_scale：朝目標前進獎勵權重。
     reward_progress_scale = 4.0
+    # reward_time_penalty：每步時間成本。
     reward_time_penalty = 0.5
+    # reward_hover_scale：終點懸停穩定獎勵權重。
     reward_hover_scale = 1.0
+    # reward_ctrl_scale：控制輸出幅度懲罰權重。
     reward_ctrl_scale = 0.05
+    # reward_success_bonus：成功到達目標一次性獎勵。
     reward_success_bonus = 30.0
+    # reward_collision_penalty：碰撞懲罰。
     reward_collision_penalty = 50.0
 
     # 課程學習（障礙物方塊）

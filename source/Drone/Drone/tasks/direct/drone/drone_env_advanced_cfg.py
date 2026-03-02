@@ -36,17 +36,21 @@ class DroneTrainEnvCfg(DroneEnvCfg):
     curriculum_level = 5
 
     # training-specific reward terms for smoother and upright flight
+    # reward_lin_vel_scale / reward_ang_vel_scale：速度穩定性約束。
     reward_progress_scale = 4.0
     reward_time_penalty = 0.5
     reward_ctrl_scale = 0.05
     reward_lin_vel_scale = 0.10
     reward_ang_vel_scale = 0.08
+    # reward_tilt_scale：抑制大傾角，讓飛行更平穩。
     reward_tilt_scale = 0.40
     reward_hover_scale = 1.0
 
     # termination thresholds
+    # reset_min_height / reset_max_height：可接受高度範圍。
     reset_min_height = 0.35
     reset_max_height = 8.0
+    # max_lin_speed / max_ang_speed：速度超限即視為失控。
     max_lin_speed = 2.5
     max_ang_speed = 2.5
 

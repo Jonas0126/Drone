@@ -36,6 +36,15 @@ class DroneTargetTouchEnvWindow(BaseEnvWindow):
 
 @configclass
 class DroneTargetTouchEnvCfg(DirectRLEnvCfg):
+    """Target Touch 任務主設定（舊系列基底）。
+
+    這份設定會被：
+    - `DroneTargetTouchEnv`（訓練）
+    - `DroneTargetTouchTestEnv`（測試）
+    - Moving/Vehicle 等衍生系列
+    共同引用或繼承。
+    """
+
     # 環境基本參數
     episode_length_s = 30.0
     decimation = 2
@@ -87,6 +96,7 @@ class DroneTargetTouchEnvCfg(DirectRLEnvCfg):
 
     # 獎勵係數
     # 可選替代獎勵：r = r_prog + r_cmd - r_crash
+    # 啟用後，將使用「進度 + 控制懲罰 - 撞毀」的簡化獎勵（目前預設關閉）。
     use_progress_cmd_crash_reward = False
     reward_progress_scale = 1.0
     reward_cmd_omega_scale = 0.0
@@ -131,6 +141,7 @@ class DroneTargetTouchEnvCfg(DirectRLEnvCfg):
     ground_contact_body_margin = 0.02
 
     # touch 任務參數
+    # 目標點半徑（m）。
     touch_radius = 0.48
     # 啟用時，touch 成功閾值使用（目標半徑 + 機體球半徑 + margin）。
     # 將 `drone_body_sphere_radius` 設為固定值可強制指定半徑；
@@ -139,6 +150,7 @@ class DroneTargetTouchEnvCfg(DirectRLEnvCfg):
     drone_body_sphere_radius = 0.2
     drone_body_sphere_margin = 0.23
     enable_touch_reward = True
+    # True 時觸碰會直接終止回合。
     terminate_on_touch = True
     near_touch_outer_radius = 0.75
     near_touch_hover_speed_threshold = 0.12

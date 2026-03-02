@@ -25,6 +25,7 @@ class DroneTargetTouchMovingEnvCfg(DroneTargetTouchEnvCfg):
       目標高度安全邊界，避免移動到地板下或超過可接受高度。
     """
 
+    # 沿用 touch 系列同一套 debug 視窗。
     ui_window_class_type = DroneTargetTouchEnvWindow
 
     # Disable spawn curriculum in moving stages; keep it only in static touch stage.
@@ -44,6 +45,7 @@ class DroneTargetTouchMovingEnvCfg(DroneTargetTouchEnvCfg):
     moving_target_vertical_dir_scale = 0.6
     # Keep baseline moving behavior unchanged; ladder stages can override these.
     moving_target_turn_rate_limit = 0.0
+    # True: 禁止單步直接反向（避免目標瞬間折返）。
     moving_target_no_instant_reverse = False
     moving_target_z_wave_amplitude = 0.2  # m/s
     moving_target_z_wave_period_s = 8.0

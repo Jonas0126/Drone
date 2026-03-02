@@ -34,14 +34,22 @@ class DroneTargetTouchEnv(DirectRLEnv):
         """
         super().__init__(cfg, render_mode, **kwargs)
 
+        # 當前步動作（[-1, 1]），形狀: [num_envs, 4]。
         self._actions = torch.zeros(self.num_envs, gym.spaces.flatdim(self.single_action_space), device=self.device)
+        # 上一步動作，用於計算動作變化懲罰（tcmd delta）。
         self._prev_actions = torch.zeros_like(self._actions)
+        # 外力緩衝（只用 z 推力），形狀: [num_envs, 1, 3]。
         self._thrust = torch.zeros(self.num_envs, 1, 3, device=self.device)
+        # 外力矩緩衝（x/y/z），形狀: [num_envs, 1, 3]。
         self._moment = torch.zeros(self.num_envs, 1, 3, device=self.device)
+        # 目標世界座標（每個 env 一個 3D 目標點）。
         self._desired_pos_w = torch.zeros(self.num_envs, 3, device=self.device)
+        # 每次重生後，目標與無人機初始距離（供測試 print/統計）。
         self._last_respawn_target_dist = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
+        # 上一步到目標距離（可供進度類獎勵擴充使用）。
         self._prev_distance_to_goal = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
 
+        # 需長期記錄到 TensorBoard 的 reward 組件名稱。
         reward_log_keys = [
             "lin_vel",
             "ang_vel",
@@ -51,6 +59,7 @@ class DroneTargetTouchEnv(DirectRLEnv):
             "approach_reward",
             "tcmd_penalty",
             "time_penalty",
+            "timeout_penalty",
             "near_touch_hover_penalty",
             "distance_penalty",
             "death_penalty",
@@ -61,15 +70,22 @@ class DroneTargetTouchEnv(DirectRLEnv):
         self._episode_sums = {
             key: torch.zeros(self.num_envs, dtype=torch.float, device=self.device) for key in reward_log_keys
         }
+        # 每個 env 是否在終止步達成 touched（供 reset 統計）。
         self._term_touched = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        # hover/spawn 課程累積步數（以 reset 批次累加）。
         self._curriculum_step = 0
         # 目標距離課程專用步數計數器：避免大量環境同時 reset 時課程升級過快。
         self._target_dist_curriculum_step = 0
+        # 無人機等效球半徑（touch threshold / ground contact 代理用）。
         self._drone_body_sphere_radius = self._resolve_drone_body_sphere_radius()
 
+        # body 索引（用於把外力施加到主體剛體）。
         self._body_id = self._robot.find_bodies("body")[0]
+        # 機體總質量（kg）。
         self._robot_mass = self._robot.root_physx_view.get_masses()[0].sum()
+        # 重力向量模長（m/s^2）。
         self._gravity_magnitude = torch.tensor(self.sim.cfg.gravity, device=self.device).norm()
+        # 機體重量（N = m * g），供推力映射使用。
         self._robot_weight = (self._robot_mass * self._gravity_magnitude).item()
 
         self.set_debug_vis(self.cfg.debug_vis)
@@ -329,6 +345,7 @@ class DroneTargetTouchEnv(DirectRLEnv):
         time_out = self.episode_length_buf >= self.max_episode_length - 1
         failed_no_touch = time_out & (~touched) & (~died) & (~far_away)
         death_penalty = -self.cfg.death_penalty * died.float()
+        timeout_penalty = -self.cfg.death_penalty * time_out.float()
         far_away_penalty = -self.cfg.death_penalty * far_away.float()
         failure_penalty = -self.cfg.death_penalty * failed_no_touch.float()
         tilt_forward_reward_scale = float(getattr(self.cfg, "tilt_forward_reward_scale", 0.0))
@@ -369,6 +386,7 @@ class DroneTargetTouchEnv(DirectRLEnv):
             "approach_reward": approach_reward,
             "tcmd_penalty": tcmd_penalty,
             "time_penalty": time_penalty,
+            "timeout_penalty": timeout_penalty,
             "near_touch_hover_penalty": near_touch_hover_penalty,
             "distance_penalty": distance_penalty,
             "death_penalty": death_penalty,
@@ -377,7 +395,10 @@ class DroneTargetTouchEnv(DirectRLEnv):
             "failure_penalty": failure_penalty,
         }
         # 總獎勵 = 各項 shaping 與終局導向項的加總。
-        reward = torch.sum(torch.stack(list(rewards.values())), dim=0)
+        reward = torch.sum(
+            torch.stack([value for key, value in rewards.items() if key != "timeout_penalty"]),
+            dim=0,
+        )
 
         self._prev_distance_to_goal = distance_to_goal.detach()
         self._prev_actions.copy_(self._actions.detach())

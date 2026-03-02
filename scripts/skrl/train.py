@@ -41,6 +41,12 @@ parser.add_argument(
     "--distributed", action="store_true", default=False, help="Run training with multiple GPUs or nodes."
 )
 parser.add_argument("--checkpoint", type=str, default=None, help="Path to model checkpoint to resume training.")
+parser.add_argument(
+    "--checkpoint_weights_only",
+    action="store_true",
+    default=False,
+    help="Load only model weights from checkpoint (skip optimizer/scheduler state).",
+)
 parser.add_argument("--max_iterations", type=int, default=None, help="RL Policy training iterations.")
 parser.add_argument("--export_io_descriptors", action="store_true", default=False, help="Export IO descriptors.")
 parser.add_argument(
@@ -97,6 +103,7 @@ from datetime import datetime
 from packaging import version
 
 import skrl
+import torch
 
 # check for minimum supported skrl version
 SKRL_VERSION = "1.4.3"
@@ -132,6 +139,64 @@ from isaaclab_tasks.utils.hydra import hydra_task_config
 logger = logging.getLogger(__name__)
 
 import Drone.tasks  # noqa: F401
+
+
+def _print_optimizer_lrs(agent, tag: str):
+    """Print current optimizer LR(s) for quick sanity check."""
+    opts = None
+    if hasattr(agent, "optimizers"):
+        opts = agent.optimizers
+    elif hasattr(agent, "optimizer"):
+        opts = agent.optimizer
+
+    if opts is None:
+        print(f"[INFO] {tag} optimizer LR: <not found>")
+        return
+
+    if isinstance(opts, dict):
+        opts = list(opts.values())
+    elif not isinstance(opts, (list, tuple)):
+        opts = [opts]
+
+    lrs = []
+    for opt in opts:
+        if opt is None:
+            continue
+        for pg in getattr(opt, "param_groups", []):
+            lr = pg.get("lr", None)
+            if lr is not None:
+                lrs.append(float(lr))
+
+    if lrs:
+        print(f"[INFO] {tag} optimizer LR(s): {lrs}")
+    else:
+        print(f"[INFO] {tag} optimizer LR: <not found>")
+
+
+def _load_checkpoint_weights_only(agent, path: str):
+    """Load checkpoint model weights only (no optimizer/scheduler state)."""
+    if version.parse(torch.__version__) >= version.parse("1.13"):
+        modules = torch.load(path, map_location=agent.device, weights_only=False)
+    else:
+        modules = torch.load(path, map_location=agent.device)
+
+    if not isinstance(modules, dict):
+        raise TypeError(f"Unsupported checkpoint format: {type(modules)}")
+
+    loaded_names: list[str] = []
+    for name, model in agent.models.items():
+        if model is None:
+            continue
+        state_dict = modules.get(name, None)
+        if state_dict is None:
+            print(f"[WARN] Weights-only load: missing model '{name}' in checkpoint")
+            continue
+        model.load_state_dict(state_dict)
+        if hasattr(model, "eval"):
+            model.eval()
+        loaded_names.append(name)
+
+    print(f"[INFO] Weights-only load complete. Loaded models: {loaded_names}")
 
 
 
@@ -244,11 +309,20 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # configure and instantiate the skrl runner
     # https://skrl.readthedocs.io/en/latest/api/utils/runner.html
     runner = Runner(env, agent_cfg)
+    _print_optimizer_lrs(runner.agent, "Before checkpoint load")
 
     # load checkpoint (if specified)
     if resume_path:
         print(f"[INFO] Loading model checkpoint from: {resume_path}")
-        runner.agent.load(resume_path)
+        if args_cli.checkpoint_weights_only:
+            if not args_cli.ml_framework.startswith("torch"):
+                print("[WARN] --checkpoint_weights_only only supports torch now. Fallback to full checkpoint load.")
+                runner.agent.load(resume_path)
+            else:
+                _load_checkpoint_weights_only(runner.agent, resume_path)
+        else:
+            runner.agent.load(resume_path)
+        _print_optimizer_lrs(runner.agent, "After checkpoint load")
 
     # run training
     runner.run()
