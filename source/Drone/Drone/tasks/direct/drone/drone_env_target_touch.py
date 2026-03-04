@@ -346,8 +346,10 @@ class DroneTargetTouchEnv(DirectRLEnv):
         failed_no_touch = time_out & (~touched) & (~died) & (~far_away)
         death_penalty = -self.cfg.death_penalty * died.float()
         timeout_penalty = -self.cfg.death_penalty * time_out.float()
-        far_away_penalty = -self.cfg.death_penalty * far_away.float()
-        failure_penalty = -self.cfg.death_penalty * failed_no_touch.float()
+        far_away_penalty_scale = float(getattr(self.cfg, "far_away_penalty", self.cfg.death_penalty))
+        far_away_penalty = -far_away_penalty_scale * far_away.float()
+        failure_penalty_scale = float(getattr(self.cfg, "failure_penalty", self.cfg.death_penalty))
+        failure_penalty = -failure_penalty_scale * failed_no_touch.float()
         tilt_forward_reward_scale = float(getattr(self.cfg, "tilt_forward_reward_scale", 0.0))
         gravity_b = self._robot.data.projected_gravity_b
         g_norm = torch.linalg.norm(gravity_b, dim=1).clamp_min(1e-6)

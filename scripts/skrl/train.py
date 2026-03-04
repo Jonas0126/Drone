@@ -68,6 +68,40 @@ parser.add_argument(
 )
 parser.add_argument("--debug_cam", action="store_true", default=False, help="Enable debug depth camera capture mode.")
 parser.add_argument("--debug_collision", action="store_true", default=False, help="Enable debug collision mode.")
+parser.add_argument("--finetune", action="store_true", default=False, help="Enable fine-tuning mode (Stage2 only).")
+parser.add_argument(
+    "--reset-state-preprocessor",
+    dest="reset_state_preprocessor",
+    action="store_true",
+    default=True,
+    help="When --finetune is enabled, reset state preprocessor statistics (default: true).",
+)
+parser.add_argument(
+    "--no-reset-state-preprocessor",
+    dest="reset_state_preprocessor",
+    action="store_false",
+    help="When --finetune is enabled, keep loaded state preprocessor statistics.",
+)
+parser.add_argument(
+    "--reset-value-preprocessor",
+    dest="reset_value_preprocessor",
+    action="store_true",
+    default=True,
+    help="When --finetune is enabled, reset value preprocessor statistics (default: true).",
+)
+parser.add_argument(
+    "--no-reset-value-preprocessor",
+    dest="reset_value_preprocessor",
+    action="store_false",
+    help="When --finetune is enabled, keep loaded value preprocessor statistics.",
+)
+parser.add_argument("--warmstart-lr", type=float, default=None, help="Override optimizer LR for fine-tune warm-start.")
+parser.add_argument(
+    "--warmstart-steps",
+    type=int,
+    default=0,
+    help="Reserved for future warm-up schedule (currently only logged, no actor freeze).",
+)
 parser.add_argument(
     "--curriculum-level",
     type=int,
@@ -100,6 +134,7 @@ import os
 import random
 import time
 from datetime import datetime
+from numbers import Number
 from packaging import version
 
 import skrl
@@ -131,6 +166,7 @@ from isaaclab.utils.dict import print_dict
 from isaaclab.utils.io import dump_yaml
 
 from isaaclab_rl.skrl import SkrlVecEnvWrapper
+from utils.finetune import reset_preprocessors, set_optimizer_lr
 
 import isaaclab_tasks  # noqa: F401
 from isaaclab_tasks.utils.hydra import hydra_task_config
@@ -199,6 +235,82 @@ def _load_checkpoint_weights_only(agent, path: str):
     print(f"[INFO] Weights-only load complete. Loaded models: {loaded_names}")
 
 
+class StepCounterVecEnvWrapper:
+    """Count vectorized env steps and transitions for timestep interpretation debugging."""
+
+    def __init__(self, env, print_interval: int = 1000):
+        self.env = env
+        self.print_interval = int(print_interval)
+        self.vector_step_count = 0
+        self.transition_count = 0
+        self._agent = None
+
+    def set_agent(self, agent):
+        """Attach skrl agent for optional timestep introspection."""
+        self._agent = agent
+
+    def _infer_transition_batch_size(self, actions) -> int:
+        if actions is None:
+            return 0
+        # For torch/jax arrays this corresponds to the vectorized env batch dimension.
+        if hasattr(actions, "shape") and len(actions.shape) >= 1:
+            try:
+                return int(actions.shape[0])
+            except Exception:
+                pass
+        try:
+            return int(len(actions))
+        except Exception:
+            return 0
+
+    def _get_skrl_timestep(self):
+        if self._agent is None:
+            return None
+        # Different skrl versions/agents expose timestep counters using different attribute names.
+        for attr in ("timestep", "_timestep", "timesteps", "_timesteps", "_step"):
+            if not hasattr(self._agent, attr):
+                continue
+            value = getattr(self._agent, attr)
+            if callable(value):
+                try:
+                    value = value()
+                except Exception:
+                    continue
+            if isinstance(value, Number):
+                return int(value)
+        return None
+
+    def step(self, actions):
+        out = self.env.step(actions)
+        self.vector_step_count += 1
+        self.transition_count += self._infer_transition_batch_size(actions)
+        if self.print_interval > 0 and self.vector_step_count % self.print_interval == 0:
+            skrl_timestep = self._get_skrl_timestep()
+            ratio = (
+                float(self.transition_count) / float(self.vector_step_count)
+                if self.vector_step_count > 0
+                else 0.0
+            )
+            print(
+                "[TIMESTEP-DEBUG] "
+                f"vector_step_count={self.vector_step_count} "
+                f"transition_count={self.transition_count} "
+                f"transitions_per_vector_step={ratio:.1f} "
+                f"skrl_agent_timestep={skrl_timestep if skrl_timestep is not None else 'N/A'}",
+                flush=True,
+            )
+        return out
+
+    def reset(self, *args, **kwargs):
+        return self.env.reset(*args, **kwargs)
+
+    def close(self):
+        return self.env.close()
+
+    def __getattr__(self, name):
+        return getattr(self.env, name)
+
+
 
 # config shortcuts
 if args_cli.agent is None:
@@ -212,6 +324,12 @@ else:
 @hydra_task_config(args_cli.task, agent_cfg_entry_point)
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: dict):
     """Train with skrl agent."""
+    if args_cli.finetune:
+        if not (args_cli.task and "Stage2" in args_cli.task):
+            raise ValueError("--finetune is restricted to Stage2 tasks only")
+        if not args_cli.ml_framework.startswith("torch"):
+            raise ValueError("--finetune currently supports only torch backend")
+
     # override configurations with non-hydra CLI arguments
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else env_cfg.scene.num_envs
     env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
@@ -306,9 +424,18 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # wrap around environment for skrl
     env = SkrlVecEnvWrapper(env, ml_framework=args_cli.ml_framework)  # same as: `wrap_env(env, wrapper="auto")`
 
+    # Stage0 timestep debug wrapper disabled.
+    # (Uncomment the block below if timestep counting debug is needed again.)
+    # is_stage0_task = bool(args_cli.task and "Stage0" in args_cli.task)
+    # if is_stage0_task:
+    #     env = StepCounterVecEnvWrapper(env, print_interval=1000)
+    #     print("[INFO] Stage0 timestep debug counter enabled (print_interval=1000 vector steps).")
+
     # configure and instantiate the skrl runner
     # https://skrl.readthedocs.io/en/latest/api/utils/runner.html
     runner = Runner(env, agent_cfg)
+    if isinstance(env, StepCounterVecEnvWrapper):
+        env.set_agent(runner.agent)
     _print_optimizer_lrs(runner.agent, "Before checkpoint load")
 
     # load checkpoint (if specified)
@@ -323,6 +450,29 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         else:
             runner.agent.load(resume_path)
         _print_optimizer_lrs(runner.agent, "After checkpoint load")
+
+    if args_cli.finetune:
+        summary = reset_preprocessors(
+            agent=runner.agent,
+            env=env,
+            device=env.unwrapped.device if hasattr(env, "unwrapped") and hasattr(env.unwrapped, "device") else env.device,
+            reset_state=args_cli.reset_state_preprocessor,
+            reset_value=args_cli.reset_value_preprocessor,
+        )
+        print(
+            "[FINETUNE] reset preprocessors: "
+            f"state={args_cli.reset_state_preprocessor}, value={args_cli.reset_value_preprocessor}"
+        )
+        print(f"[FINETUNE] preprocessor summary: {summary}")
+
+        if args_cli.warmstart_lr is not None:
+            set_optimizer_lr(runner.agent, args_cli.warmstart_lr)
+            print(f"[FINETUNE] warmstart_lr applied: {args_cli.warmstart_lr}")
+            _print_optimizer_lrs(runner.agent, "After warmstart LR set")
+        else:
+            print("[FINETUNE] warmstart_lr not set; keeping checkpoint/config LR")
+
+        print(f"[FINETUNE] warmstart_steps={args_cli.warmstart_steps} (reserved, no freeze applied)")
 
     # run training
     runner.run()

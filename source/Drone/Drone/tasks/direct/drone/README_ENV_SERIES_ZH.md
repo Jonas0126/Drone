@@ -7,7 +7,7 @@
 - `drone_env_basic_cfg.py`：Basic 系列設定（場景、相機、獎勵、課程）
 - `drone_env_advanced_cfg.py`：Advanced 系列設定（多障礙等級）
 - `drone_env_target_touch_cfg.py`：Target Touch 舊系列基底設定
-- `drone_env_target_touch_vehicle_cfg.py`：Vehicle 新系列 Stage0~Stage5 設定
+- `drone_env_target_touch_vehicle_cfg.py`：Vehicle 新系列 Stage0~Stage2 設定
 - `drone_env_target_touch_moving_cfg.py`：Moving 系列基底設定
 - `drone_env_target_touch_moving_fast_cfg.py`：Moving Fast 設定
 - `drone_env_target_touch_moving_ladder_cfg.py`：Moving 速度階梯（Faster/VeryFast/UltraFast）
@@ -55,16 +55,9 @@
 - `Drone-Direct-Target-Touch-Vehicle-Stage0-v0` / `-Test-v0`
 - `Drone-Direct-Target-Touch-Vehicle-Stage1-v0` / `-Test-v0`
 - `Drone-Direct-Target-Touch-Vehicle-Stage2-v0` / `-Test-v0`
-- `Drone-Direct-Target-Touch-Vehicle-Stage3-v0` / `-Test-v0`
-- `Drone-Direct-Target-Touch-Vehicle-Stage4-v0` / `-Test-v0`
-- `Drone-Direct-Target-Touch-Vehicle-Stage5-v0` / `-Test-v0`
-- `Drone-Direct-Target-Touch-Vehicle-Faster-v0` / `-Test-v0`
-- `Drone-Direct-Target-Touch-Vehicle-VeryFast-v0` / `-Test-v0`
-- `Drone-Direct-Target-Touch-Vehicle-UltraFast-v0` / `-Test-v0`
 
 對應設定：
-- Stage0~5：`drone_env_target_touch_vehicle_cfg.py`
-- Faster 以上：`drone_env_target_touch_moving_ladder_cfg.py`
+- Stage0~2：`drone_env_target_touch_vehicle_cfg.py`
 
 ## 3. 動作空間與觀測空間
 
@@ -140,17 +133,19 @@
 
 - 固定為 25 維觀測
 - 以「外部階段」方式切分難度（每個 stage 一個獨立 env）
-- 目前 Stage0~Stage5 已統一採用 Stage1 參數模板
-- 各 stage **唯一差異**：目標重生距離區間（`target_spawn_distance_min/max`）
+- 目前 Stage0~Stage2 已統一採用 Stage1 參數模板
+- 各 stage 主要差異：目標重生距離區間（`target_spawn_distance_min/max`）
+- 例外：Stage0 目前額外啟用姿態控制強化
+  - `ang_vel_reward_scale = -0.002`
+  - `tilt_forward_reward_scale = 0.05`
+  - `tcmd_lambda_4 = 1e-2`
+  - `tcmd_lambda_5 = 1e-3`
 
 目前距離區間：
 
-- Stage0：15 ~ 25 m
-- Stage1：30 ~ 60 m
-- Stage2：20 ~ 40 m
-- Stage3：20 ~ 40 m
-- Stage4：20 ~ 40 m
-- Stage5：25 ~ 50 m
+- Stage0：10 ~ 40 m（已固定，不啟用 Stage0 內部 target-distance 課程）
+- Stage1：20 ~ 50 m（對齊 2026-03-03_15-33-30 配置：`approach_reward_scale=0.1`、`time_penalty_scale=0.20`、`distance_to_goal_tanh_scale=3.2`、`death_penalty=300`、`failure_penalty=300`、`tcmd_lambda_4=5e-3`、`tcmd_lambda_5=5e-4`）
+- Stage2：20 ~ 50 m（速度/通過率優化：`approach_reward_scale=0.1`、`time_penalty_scale=0.20`、`distance_to_goal_tanh_scale=28`、`death_penalty=300`、`failure_penalty=300`、`tcmd_lambda_4=5e-3`、`tcmd_lambda_5=5e-4`）
 
 ## 7. 測試環境輸出
 
