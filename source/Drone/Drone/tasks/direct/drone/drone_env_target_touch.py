@@ -12,7 +12,7 @@ import torch
 import isaaclab.sim as sim_utils
 from isaaclab.assets import Articulation
 from isaaclab.envs import DirectRLEnv
-from isaaclab.utils.math import matrix_from_quat, subtract_frame_transforms
+from isaaclab.utils.math import matrix_from_quat, quat_from_euler_xyz, subtract_frame_transforms
 
 from .drone_env_target_touch_cfg import DroneTargetTouchEnvCfg
 from .markers import CUBOID_MARKER_CFG, VisualizationMarkers
@@ -44,25 +44,35 @@ class DroneTargetTouchEnv(DirectRLEnv):
         self._moment = torch.zeros(self.num_envs, 1, 3, device=self.device)
         # 目標世界座標（每個 env 一個 3D 目標點）。
         self._desired_pos_w = torch.zeros(self.num_envs, 3, device=self.device)
+        # 展示場景可把 extended observation 的 x/y 改成「相對本回合重生點」的局部座標。
+        self._observation_local_origin_xy = torch.zeros(self.num_envs, 2, device=self.device)
         # 每次重生後，目標與無人機初始距離（供測試 print/統計）。
         self._last_respawn_target_dist = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
         # 上一步到目標距離（可供進度類獎勵擴充使用）。
         self._prev_distance_to_goal = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
+        # 本回合歷史最近距離：progress reward 只獎勵「刷新最佳距離」，避免來回刷分。
+        self._best_distance_to_goal = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
 
         # 需長期記錄到 TensorBoard 的 reward 組件名稱。
         reward_log_keys = [
             "lin_vel",
             "ang_vel",
             "distance_to_goal",
+            "speed_to_goal_reward",
             "touch_bonus",
             "touch_early_bonus",
             "approach_reward",
+            "progress_reward",
             "tcmd_penalty",
             "time_penalty",
             "timeout_penalty",
             "near_touch_hover_penalty",
+            "near_touch_push_reward",
+            "follow_behind_penalty",
             "distance_penalty",
             "death_penalty",
+            "tilt_death_penalty",
+            "tilt_excess_penalty",
             "tilt_forward_reward",
             "far_away_penalty",
             "failure_penalty",
@@ -134,6 +144,34 @@ class DroneTargetTouchEnv(DirectRLEnv):
             getattr(self.cfg, "drone_body_sphere_margin", 0.0)
         )
 
+    def _get_visual_altitude_offset(self) -> float:
+        """回傳展示用固定高度偏移。"""
+        return float(getattr(self.cfg, "visual_altitude_offset_z", 0.0))
+
+    def _get_logical_root_z(self, env_ids: torch.Tensor | None = None) -> torch.Tensor:
+        """回傳扣除展示高度偏移後的機體高度。"""
+        height_offset = self._get_visual_altitude_offset()
+        if env_ids is None:
+            return self._robot.data.root_pos_w[:, 2] - height_offset
+        return self._robot.data.root_pos_w[env_ids, 2] - height_offset
+
+    def _get_world_ground_z(self, env_ids: torch.Tensor | None = None) -> torch.Tensor:
+        """回傳展示高度偏移後的邏輯地面高度。"""
+        height_offset = self._get_visual_altitude_offset()
+        if env_ids is None:
+            return self._terrain.env_origins[:, 2] + height_offset
+        return self._terrain.env_origins[env_ids, 2] + height_offset
+
+    def _get_observation_anchor_offset_xy(self) -> torch.Tensor | None:
+        """回傳觀測用的平面錨點偏移，避免城市大座標直接進模型。"""
+        if bool(getattr(self.cfg, "observation_local_origin_xy_enabled", False)):
+            return self._observation_local_origin_xy
+        if not bool(getattr(self.cfg, "scene_anchor_enabled", False)):
+            return None
+        if self._scene_anchor_centers_w is None:
+            return None
+        return self._scene_anchor_centers_w[:, :2]
+
     def _get_ground_contact_mask(self, env_ids: torch.Tensor | None = None) -> torch.Tensor:
         """估計是否接地。
 
@@ -148,10 +186,10 @@ class DroneTargetTouchEnv(DirectRLEnv):
 
         if env_ids is None:
             root_z = self._robot.data.root_pos_w[:, 2]
-            ground_z = self._terrain.env_origins[:, 2]
+            ground_z = self._get_world_ground_z()
         else:
             root_z = self._robot.data.root_pos_w[env_ids, 2]
-            ground_z = self._terrain.env_origins[env_ids, 2]
+            ground_z = self._get_world_ground_z(env_ids)
 
         cfg_thresh = getattr(self.cfg, "ground_contact_height_threshold", None)
         if cfg_thresh is None:
@@ -214,8 +252,310 @@ class DroneTargetTouchEnv(DirectRLEnv):
         if self.device == "cpu":
             self.scene.filter_collisions(global_prim_paths=[self.cfg.terrain.prim_path])
 
-        light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
-        light_cfg.func("/World/Light", light_cfg)
+        # 展示場景可選擇完全沿用地圖本身的燈光設定，或在地圖燈光缺失時補上對應的 USD Lux 燈光。
+        if bool(getattr(self.cfg, "use_default_distant_light", False)):
+            distant_light_cfg = sim_utils.DistantLightCfg(
+                intensity=float(getattr(self.cfg, "default_distant_light_intensity", 1000.0)),
+                exposure=float(getattr(self.cfg, "default_distant_light_exposure", 0.0)),
+                angle=float(getattr(self.cfg, "default_distant_light_angle_deg", 1.0)),
+                color=tuple(getattr(self.cfg, "default_distant_light_color", (1.0, 1.0, 1.0))),
+                normalize=bool(getattr(self.cfg, "default_distant_light_normalize", False)),
+            )
+            light_rot_deg = getattr(self.cfg, "default_distant_light_euler_deg", (45.0, 0.0, 90.0))
+            light_rot_rad = torch.deg2rad(torch.tensor(light_rot_deg, dtype=torch.float))
+            light_quat = quat_from_euler_xyz(
+                light_rot_rad[0].unsqueeze(0), light_rot_rad[1].unsqueeze(0), light_rot_rad[2].unsqueeze(0)
+            )[0]
+            distant_light_cfg.func(
+                getattr(self.cfg, "default_distant_light_prim_path", "/World/defaultLight"),
+                distant_light_cfg,
+                orientation=tuple(float(v) for v in light_quat.tolist()),
+            )
+
+        if bool(getattr(self.cfg, "use_default_dome_light", True)):
+            light_cfg = sim_utils.DomeLightCfg(
+                intensity=float(getattr(self.cfg, "default_dome_light_intensity", 2000.0)),
+                exposure=float(getattr(self.cfg, "default_dome_light_exposure", 0.0)),
+                color=tuple(getattr(self.cfg, "default_dome_light_color", (0.75, 0.75, 0.75))),
+                texture_file=getattr(self.cfg, "default_dome_light_texture_file", None),
+                texture_format=str(getattr(self.cfg, "default_dome_light_texture_format", "automatic")),
+            )
+            dome_rot_deg = getattr(self.cfg, "default_dome_light_euler_deg", (0.0, 0.0, 0.0))
+            dome_rot_rad = torch.deg2rad(torch.tensor(dome_rot_deg, dtype=torch.float))
+            dome_quat = quat_from_euler_xyz(
+                dome_rot_rad[0].unsqueeze(0), dome_rot_rad[1].unsqueeze(0), dome_rot_rad[2].unsqueeze(0)
+            )[0]
+            light_cfg.func(
+                getattr(self.cfg, "default_dome_light_prim_path", "/World/Light"),
+                light_cfg,
+                orientation=tuple(float(v) for v in dome_quat.tolist()),
+            )
+
+        self._cache_scene_anchor_data()
+        self._cache_scene_obstacle_data()
+
+    def _cache_scene_anchor_data(self):
+        """快取展示地標的中心點與安全半徑。"""
+        self._scene_anchor_centers_w = None
+        self._scene_anchor_safe_radius = None
+
+        if not bool(getattr(self.cfg, "scene_anchor_enabled", False)):
+            return
+
+        prim_path_template = getattr(self.cfg, "scene_anchor_prim_path", None)
+        search_root_template = getattr(self.cfg, "scene_anchor_search_root_path", None)
+        search_name = getattr(self.cfg, "scene_anchor_search_prim_name", None)
+        fallback_xy_cfg = getattr(self.cfg, "scene_anchor_fallback_xy", None)
+        if prim_path_template is None and not (search_root_template and search_name) and fallback_xy_cfg is None:
+            return
+
+        try:
+            import omni.usd
+            from pxr import Usd, UsdGeom
+        except Exception as exc:
+            print(f"[WARN][Touch] scene anchor unavailable: {exc}", flush=True)
+            return
+
+        stage = omni.usd.get_context().get_stage()
+        if stage is None:
+            return
+
+        centers = torch.full((self.scene.cfg.num_envs, 3), float("nan"), dtype=torch.float, device=self.device)
+        safe_radii = torch.full((self.scene.cfg.num_envs,), -1.0, dtype=torch.float, device=self.device)
+        clearance_m = max(float(getattr(self.cfg, "scene_anchor_clearance_m", 0.0)), 0.0)
+        bbox_cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+
+        for env_id in range(self.scene.cfg.num_envs):
+            prim_path = None
+            prim = None
+            if prim_path_template:
+                prim_path = str(prim_path_template).format(env_id=env_id)
+                prim = stage.GetPrimAtPath(prim_path)
+            if (not prim or not prim.IsValid()) and search_root_template and search_name:
+                search_root_path = str(search_root_template).format(env_id=env_id)
+                search_root = stage.GetPrimAtPath(search_root_path)
+                prim = self._find_descendant_prim_by_name(search_root, str(search_name))
+
+            if prim and prim.IsValid():
+                world_box = bbox_cache.ComputeWorldBound(prim).GetBox()
+                box_min = world_box.GetMin()
+                box_max = world_box.GetMax()
+                center_x = 0.5 * (float(box_min[0]) + float(box_max[0]))
+                center_y = 0.5 * (float(box_min[1]) + float(box_max[1]))
+                center_z = 0.5 * (float(box_min[2]) + float(box_max[2]))
+                dx = max(float(box_max[0]) - float(box_min[0]), 0.0)
+                dy = max(float(box_max[1]) - float(box_min[1]), 0.0)
+                half_diag_xy = 0.5 * ((dx * dx + dy * dy) ** 0.5)
+                centers[env_id] = torch.tensor((center_x, center_y, center_z), dtype=torch.float, device=self.device)
+                safe_radii[env_id] = float(half_diag_xy + clearance_m)
+                continue
+
+            if fallback_xy_cfg is not None and len(fallback_xy_cfg) >= 2:
+                fallback_x = float(fallback_xy_cfg[0])
+                fallback_y = float(fallback_xy_cfg[1])
+                centers[env_id] = torch.tensor((fallback_x, fallback_y, 0.0), dtype=torch.float, device=self.device)
+                safe_radii[env_id] = float(clearance_m)
+                print(
+                    f"[WARN][Touch] scene anchor fallback to fixed XY for env_{env_id}: "
+                    f"({fallback_x:.5f}, {fallback_y:.5f})",
+                    flush=True,
+                )
+                continue
+
+            print(f"[WARN][Touch] scene anchor unresolved for env_{env_id}: {prim_path}", flush=True)
+
+        if torch.any(safe_radii > 0.0):
+            self._scene_anchor_centers_w = centers
+            self._scene_anchor_safe_radius = safe_radii
+
+    def _find_descendant_prim_by_name(self, root_prim, target_name: str):
+        """在指定根節點下遞迴搜尋 prim 名稱。"""
+        if root_prim is None or not root_prim.IsValid():
+            return None
+
+        target_name = str(target_name).lower()
+        stack = list(root_prim.GetChildren())
+        while stack:
+            prim = stack.pop()
+            if prim.GetName().lower() == target_name:
+                return prim
+            stack.extend(list(prim.GetChildren()))
+        return None
+
+    def _cache_scene_obstacle_data(self):
+        """快取展示場景的靜態障礙物包圍盒（主要供 moving target 避障）。"""
+        self._scene_obstacle_boxes_xy_min = [None] * self.scene.cfg.num_envs
+        self._scene_obstacle_boxes_xy_max = [None] * self.scene.cfg.num_envs
+        self._scene_obstacle_boxes_xy_center = [None] * self.scene.cfg.num_envs
+
+        if not bool(getattr(self.cfg, "scene_obstacle_avoidance_enabled", False)) and not bool(
+            getattr(self.cfg, "scene_obstacle_spawn_clearance_enabled", False)
+        ):
+            return
+
+        root_path_templates = tuple(getattr(self.cfg, "scene_obstacle_search_root_paths", ()))
+        if len(root_path_templates) == 0:
+            return
+
+        try:
+            import omni.usd
+            from pxr import Usd, UsdGeom
+        except Exception as exc:
+            print(f"[WARN][Touch] scene obstacle cache unavailable: {exc}", flush=True)
+            return
+
+        stage = omni.usd.get_context().get_stage()
+        if stage is None:
+            return
+
+        bbox_cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+        bbox_margin = max(float(getattr(self.cfg, "scene_obstacle_bbox_margin_m", 0.0)), 0.0)
+        min_size_xy = max(float(getattr(self.cfg, "scene_obstacle_min_size_xy_m", 0.0)), 0.0)
+        min_height = max(float(getattr(self.cfg, "scene_obstacle_min_height_m", 0.0)), 0.0)
+
+        for env_id in range(self.scene.cfg.num_envs):
+            boxes_xy_min: list[tuple[float, float]] = []
+            boxes_xy_max: list[tuple[float, float]] = []
+            boxes_xy_center: list[tuple[float, float]] = []
+
+            for root_template in root_path_templates:
+                root_path = str(root_template).format(env_id=env_id)
+                root_prim = stage.GetPrimAtPath(root_path)
+                if not root_prim or not root_prim.IsValid():
+                    continue
+
+                source_prims = list(root_prim.GetChildren())
+                if len(source_prims) == 0:
+                    source_prims = [root_prim]
+
+                for source_prim in source_prims:
+                    if source_prim is None or not source_prim.IsValid():
+                        continue
+                    try:
+                        world_box = bbox_cache.ComputeWorldBound(source_prim).GetBox()
+                    except Exception:
+                        continue
+                    box_min = world_box.GetMin()
+                    box_max = world_box.GetMax()
+                    dx = max(float(box_max[0]) - float(box_min[0]), 0.0)
+                    dy = max(float(box_max[1]) - float(box_min[1]), 0.0)
+                    dz = max(float(box_max[2]) - float(box_min[2]), 0.0)
+                    if max(dx, dy) < min_size_xy or dz < min_height:
+                        continue
+
+                    min_x = float(box_min[0]) - bbox_margin
+                    min_y = float(box_min[1]) - bbox_margin
+                    max_x = float(box_max[0]) + bbox_margin
+                    max_y = float(box_max[1]) + bbox_margin
+                    if not torch.isfinite(torch.tensor((min_x, min_y, max_x, max_y), dtype=torch.float)).all():
+                        continue
+
+                    boxes_xy_min.append((min_x, min_y))
+                    boxes_xy_max.append((max_x, max_y))
+                    boxes_xy_center.append((0.5 * (min_x + max_x), 0.5 * (min_y + max_y)))
+
+            if len(boxes_xy_min) == 0:
+                print(f"[WARN][Touch] no scene obstacle boxes cached for env_{env_id}", flush=True)
+                continue
+
+            self._scene_obstacle_boxes_xy_min[env_id] = torch.tensor(
+                boxes_xy_min, dtype=torch.float, device=self.device
+            )
+            self._scene_obstacle_boxes_xy_max[env_id] = torch.tensor(
+                boxes_xy_max, dtype=torch.float, device=self.device
+            )
+            self._scene_obstacle_boxes_xy_center[env_id] = torch.tensor(
+                boxes_xy_center, dtype=torch.float, device=self.device
+            )
+            print(
+                f"[INFO][Touch] cached {len(boxes_xy_min)} scene obstacle boxes for env_{env_id}",
+                flush=True,
+            )
+
+    def _sample_scene_anchor_ring_xy(self, env_ids: torch.Tensor) -> torch.Tensor:
+        """在展示地標外圍的安全圈或指定環狀區間內取樣 XY。"""
+        if self._scene_anchor_centers_w is None or self._scene_anchor_safe_radius is None:
+            raise RuntimeError("scene anchor cache is not initialized")
+        if not torch.all(self._scene_anchor_safe_radius[env_ids] > 0.0):
+            raise RuntimeError("scene anchor cache is unresolved for some envs")
+
+        theta = torch.empty((len(env_ids),), device=self.device).uniform_(0.0, 2.0 * torch.pi)
+        radii = self._scene_anchor_safe_radius[env_ids]
+        spawn_radius_min_cfg = getattr(self.cfg, "scene_anchor_spawn_radius_min_m", None)
+        spawn_radius_max_cfg = getattr(self.cfg, "scene_anchor_spawn_radius_max_m", None)
+        if spawn_radius_min_cfg is not None or spawn_radius_max_cfg is not None:
+            spawn_radius_min = float(spawn_radius_min_cfg if spawn_radius_min_cfg is not None else 0.0)
+            spawn_radius_max = float(spawn_radius_max_cfg if spawn_radius_max_cfg is not None else spawn_radius_min)
+            if spawn_radius_min > spawn_radius_max:
+                spawn_radius_min, spawn_radius_max = spawn_radius_max, spawn_radius_min
+            spawn_radius_min = max(spawn_radius_min, 0.0)
+            # 內半徑不能小於各 env 的安全圈半徑，避免又把出生點拉回建物內。
+            min_radii = torch.clamp(self._scene_anchor_safe_radius[env_ids], min=spawn_radius_min)
+            max_radii = torch.full_like(min_radii, max(spawn_radius_max, 0.0))
+            max_radii = torch.maximum(max_radii, min_radii)
+            if torch.any(max_radii > min_radii):
+                # 用面積均勻取樣環狀區間，避免點位過度集中在內圈。
+                u = torch.empty((len(env_ids),), device=self.device).uniform_(0.0, 1.0)
+                radii = torch.sqrt(u * (max_radii**2 - min_radii**2) + min_radii**2)
+            else:
+                radii = min_radii
+        x = self._scene_anchor_centers_w[env_ids, 0] + radii * torch.cos(theta)
+        y = self._scene_anchor_centers_w[env_ids, 1] + radii * torch.sin(theta)
+        return torch.stack((x, y), dim=1)
+
+    def _sample_scene_anchor_spawn_xy(self, env_ids: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+        """依展示場景設定取樣重生 XY；若指定矩形範圍則優先使用。"""
+        if bool(getattr(self.cfg, "scene_anchor_spawn_rect_enabled", False)):
+            x_min_cfg = getattr(self.cfg, "scene_anchor_spawn_rect_x_min", None)
+            x_max_cfg = getattr(self.cfg, "scene_anchor_spawn_rect_x_max", None)
+            y_min_cfg = getattr(self.cfg, "scene_anchor_spawn_rect_y_min", None)
+            y_max_cfg = getattr(self.cfg, "scene_anchor_spawn_rect_y_max", None)
+            if None not in (x_min_cfg, x_max_cfg, y_min_cfg, y_max_cfg):
+                x_min = float(x_min_cfg)
+                x_max = float(x_max_cfg)
+                y_min = float(y_min_cfg)
+                y_max = float(y_max_cfg)
+                if x_min > x_max:
+                    x_min, x_max = x_max, x_min
+                if y_min > y_max:
+                    y_min, y_max = y_max, y_min
+                spawn_xy = torch.empty((len(env_ids), 2), device=self.device, dtype=dtype)
+                spawn_xy[:, 0] = torch.empty((len(env_ids),), device=self.device, dtype=dtype).uniform_(x_min, x_max)
+                spawn_xy[:, 1] = torch.empty((len(env_ids),), device=self.device, dtype=dtype).uniform_(y_min, y_max)
+                return spawn_xy
+        return self._sample_scene_anchor_ring_xy(env_ids).to(dtype=dtype)
+
+    def _enforce_scene_anchor_clearance(
+        self, points_w: torch.Tensor, env_ids: torch.Tensor, extra_clearance: float = 0.0
+    ) -> torch.Tensor:
+        """將點位推到展示地標安全圈外，避免生成在大型建物內。"""
+        if self._scene_anchor_centers_w is None or self._scene_anchor_safe_radius is None:
+            return points_w
+
+        centers_xy = self._scene_anchor_centers_w[env_ids, :2]
+        safe_radius = self._scene_anchor_safe_radius[env_ids] + max(float(extra_clearance), 0.0)
+        valid_mask = safe_radius > 0.0
+        if not torch.any(valid_mask):
+            return points_w
+        adjusted_points = points_w.clone()
+        delta_xy = adjusted_points[:, :2] - centers_xy
+        dist_xy = torch.linalg.norm(delta_xy, dim=1)
+        inside_mask = valid_mask & (dist_xy < safe_radius)
+        if not torch.any(inside_mask):
+            return adjusted_points
+
+        safe_delta = delta_xy[inside_mask]
+        safe_dist = dist_xy[inside_mask]
+        degenerate = safe_dist < 1e-6
+        if torch.any(degenerate):
+            fallback_angles = torch.empty((int(degenerate.sum().item()),), device=self.device).uniform_(0.0, 2.0 * torch.pi)
+            safe_delta[degenerate, 0] = torch.cos(fallback_angles)
+            safe_delta[degenerate, 1] = torch.sin(fallback_angles)
+            safe_dist = torch.linalg.norm(safe_delta, dim=1)
+        safe_dir = safe_delta / torch.clamp(safe_dist.unsqueeze(-1), min=1e-6)
+        adjusted_points[inside_mask, 0] = centers_xy[inside_mask, 0] + safe_dir[:, 0] * safe_radius[inside_mask]
+        adjusted_points[inside_mask, 1] = centers_xy[inside_mask, 1] + safe_dir[:, 1] * safe_radius[inside_mask]
+        return adjusted_points
 
     def _pre_physics_step(self, actions: torch.Tensor):
         """把策略輸出轉成實際控制量（總推力 + 三軸力矩）。"""
@@ -237,6 +577,14 @@ class DroneTargetTouchEnv(DirectRLEnv):
             rot_mat_wb = matrix_from_quat(self._robot.data.root_quat_w).reshape(self.num_envs, 9)
             root_pos_rel = self._robot.data.root_pos_w - self._terrain.env_origins
             desired_pos_rel = self._desired_pos_w - self._terrain.env_origins
+            anchor_offset_xy = self._get_observation_anchor_offset_xy()
+            if anchor_offset_xy is not None:
+                root_pos_rel[:, :2] -= anchor_offset_xy
+                desired_pos_rel[:, :2] -= anchor_offset_xy
+            height_offset = self._get_visual_altitude_offset()
+            if abs(height_offset) > 0.0:
+                root_pos_rel[:, 2] -= height_offset
+                desired_pos_rel[:, 2] -= height_offset
             obs = torch.cat(
                 [
                     root_pos_rel,
@@ -278,11 +626,13 @@ class DroneTargetTouchEnv(DirectRLEnv):
         - lin_vel: 線速度平方懲罰（抑制平移過猛）。
         - ang_vel: 角速度平方懲罰（抑制姿態快速旋轉）。
         - distance_to_goal: 與目標距離 shaping，越近越高。
+        - speed_to_goal_reward: 越快朝目標前進且越接近目標，獎勵越高。
         - touch_bonus: 進入 touch 半徑時的一次性正獎勵。
         - touch_early_bonus: 越早碰到目標，額外加分越多。
         - approach_reward: 在機體座標系中，朝目標方向前進速度的正獎勵。
         - time_penalty: 每一步固定扣分，鼓勵更短時間完成。
         - near_touch_hover_penalty: 靠近目標卻低速懸停、未實際碰觸時的懲罰。
+        - follow_behind_penalty: 跟在目標後方但接近速度不足時的懲罰。
         """
         # 先計算會被多個 reward 項共用的狀態量，減少重複計算。
         lin_vel = torch.sum(torch.square(self._robot.data.root_lin_vel_b), dim=1)
@@ -299,6 +649,24 @@ class DroneTargetTouchEnv(DirectRLEnv):
         approach_speed = torch.sum(self._robot.data.root_lin_vel_b * goal_dir_b, dim=1)
         approach_reward_scale = getattr(self.cfg, "approach_reward_scale", 0.0)
         approach_reward = approach_reward_scale * torch.clamp(approach_speed, min=0.0) * self.step_dt
+        # 進度獎勵預設沿用「比上一步更近」；特定任務可改成只獎勵刷新本回合最佳距離。
+        if bool(getattr(self.cfg, "progress_reward_best_so_far_only", False)):
+            progress_to_goal = torch.clamp(self._best_distance_to_goal - distance_to_goal, min=0.0)
+        else:
+            progress_to_goal = self._prev_distance_to_goal - distance_to_goal
+        if bool(getattr(self.cfg, "progress_reward_normalize_by_initial_distance", False)):
+            progress_init_dist_min = max(float(getattr(self.cfg, "progress_reward_initial_distance_min", 10.0)), 1e-6)
+            progress_den = torch.clamp(self._last_respawn_target_dist, min=progress_init_dist_min)
+            progress_to_goal = progress_to_goal / progress_den
+        progress_reward_scale = float(getattr(self.cfg, "progress_reward_scale", 0.0))
+        progress_reward = progress_reward_scale * progress_to_goal
+        speed_to_goal_reward_scale = float(getattr(self.cfg, "speed_to_goal_reward_scale", 0.0))
+        speed_to_goal_reward = (
+            speed_to_goal_reward_scale
+            * torch.clamp(approach_speed, min=0.0)
+            * distance_to_goal_mapped
+            * self.step_dt
+        )
         # r_tcmd = λ4 * ||a_omega,t|| + λ5 * ||a_t - a_{t-1}||^2（在總獎勵中作為懲罰扣除）
         tcmd_lambda_4 = float(getattr(self.cfg, "tcmd_lambda_4", 0.0))
         tcmd_lambda_5 = float(getattr(self.cfg, "tcmd_lambda_5", 0.0))
@@ -316,6 +684,17 @@ class DroneTargetTouchEnv(DirectRLEnv):
 
         touch_threshold = self._get_touch_threshold()
         touched = distance_to_goal <= touch_threshold
+        near_touch_distance_reward_ratio = float(getattr(self.cfg, "near_touch_distance_reward_ratio", 1.0))
+        near_touch_distance_reward_ratio = min(max(near_touch_distance_reward_ratio, 0.0), 1.0)
+        near_touch_not_touched = (distance_to_goal < self.cfg.near_touch_outer_radius) & (~touched)
+        distance_to_goal_scale = torch.ones_like(distance_to_goal)
+        distance_to_goal_scale[near_touch_not_touched] = near_touch_distance_reward_ratio
+        distance_to_goal_reward = (
+            distance_to_goal_mapped
+            * distance_to_goal_scale
+            * self.cfg.distance_to_goal_reward_scale
+            * self.step_dt
+        )
         touch_bonus = (
             self.cfg.touch_bonus_reward * touched.float() if self.cfg.enable_touch_reward else torch.zeros_like(distance_to_goal)
         )
@@ -339,12 +718,50 @@ class DroneTargetTouchEnv(DirectRLEnv):
         )
         near_touch_hover_penalty_scale = getattr(self.cfg, "near_touch_hover_penalty", 0.0)
         near_touch_hover_penalty = -near_touch_hover_penalty_scale * hovering_near_touch.float() * self.step_dt
-        died_by_height = self._robot.data.root_pos_w[:, 2] < float(getattr(self.cfg, "died_height_threshold", 0.3))
-        died = died_by_height | self._get_ground_contact_mask()
+        near_touch_push_reward_scale = float(getattr(self.cfg, "near_touch_push_reward_scale", 0.0))
+        near_touch_zone = (
+            (distance_to_goal > touch_threshold)
+            & (distance_to_goal < self.cfg.near_touch_outer_radius)
+            & (approach_speed > 0.0)
+        )
+        near_touch_zone_span = max(float(self.cfg.near_touch_outer_radius - touch_threshold), 1e-6)
+        near_touch_closeness = torch.clamp(
+            1.0 - (distance_to_goal - touch_threshold) / near_touch_zone_span,
+            min=0.0,
+            max=1.0,
+        )
+        near_touch_push_reward = near_touch_push_reward_scale * near_touch_closeness * near_touch_zone.float() * self.step_dt
+        follow_behind_penalty_scale = float(getattr(self.cfg, "follow_behind_penalty_scale", 0.0))
+        follow_behind_outer_radius = float(getattr(self.cfg, "follow_behind_outer_radius", self.cfg.near_touch_outer_radius))
+        follow_behind_outer_radius = max(follow_behind_outer_radius, touch_threshold + 1e-6)
+        follow_behind_min_approach_speed = float(getattr(self.cfg, "follow_behind_min_approach_speed", 0.0))
+        follow_behind_zone = (
+            (distance_to_goal > touch_threshold)
+            & (distance_to_goal < follow_behind_outer_radius)
+            & (approach_speed < follow_behind_min_approach_speed)
+        )
+        follow_behind_closeness = torch.clamp(
+            1.0 - (distance_to_goal - touch_threshold) / (follow_behind_outer_radius - touch_threshold),
+            min=0.0,
+            max=1.0,
+        )
+        follow_behind_penalty = (
+            -follow_behind_penalty_scale
+            * follow_behind_closeness
+            * follow_behind_zone.float()
+            * self.step_dt
+        )
+        died_by_height = self._get_logical_root_z() < float(getattr(self.cfg, "died_height_threshold", 0.3))
+        died_by_ground = self._get_ground_contact_mask()
+        died_by_tilt = self._get_tilt_exceeded_mask()
+        died = died_by_height | died_by_ground | died_by_tilt
         far_away = distance_to_goal > self.cfg.far_away_termination_distance
         time_out = self.episode_length_buf >= self.max_episode_length - 1
         failed_no_touch = time_out & (~touched) & (~died) & (~far_away)
-        death_penalty = -self.cfg.death_penalty * died.float()
+        non_tilt_died = died_by_height | died_by_ground
+        death_penalty = -self.cfg.death_penalty * non_tilt_died.float()
+        tilt_death_penalty_scale = float(getattr(self.cfg, "tilt_death_penalty", self.cfg.death_penalty))
+        tilt_death_penalty = -tilt_death_penalty_scale * died_by_tilt.float()
         timeout_penalty = -self.cfg.death_penalty * time_out.float()
         far_away_penalty_scale = float(getattr(self.cfg, "far_away_penalty", self.cfg.death_penalty))
         far_away_penalty = -far_away_penalty_scale * far_away.float()
@@ -378,20 +795,30 @@ class DroneTargetTouchEnv(DirectRLEnv):
             * moving_toward_goal
             * self.step_dt
         )
+        tilt_excess_penalty_scale = float(getattr(self.cfg, "tilt_excess_penalty_scale", 0.0))
+        tilt_limit_deg = float(getattr(self.cfg, "max_tilt_deg", 35.0))
+        tilt_excess_ratio = torch.clamp((tilt_deg - tilt_limit_deg) / max(tilt_limit_deg, 1e-6), min=0.0)
+        tilt_excess_penalty = -tilt_excess_penalty_scale * tilt_excess_ratio * self.step_dt
         # 各 reward 組件字典，方便訓練紀錄與除錯。
         rewards = {
             "lin_vel": lin_vel * near_touch_scale * self.cfg.lin_vel_reward_scale * self.step_dt,
             "ang_vel": ang_vel * near_touch_scale * self.cfg.ang_vel_reward_scale * self.step_dt,
-            "distance_to_goal": distance_to_goal_mapped * self.cfg.distance_to_goal_reward_scale * self.step_dt,
+            "distance_to_goal": distance_to_goal_reward,
+            "speed_to_goal_reward": speed_to_goal_reward,
             "touch_bonus": touch_bonus,
             "touch_early_bonus": touch_early_bonus,
             "approach_reward": approach_reward,
+            "progress_reward": progress_reward,
             "tcmd_penalty": tcmd_penalty,
             "time_penalty": time_penalty,
             "timeout_penalty": timeout_penalty,
             "near_touch_hover_penalty": near_touch_hover_penalty,
+            "near_touch_push_reward": near_touch_push_reward,
+            "follow_behind_penalty": follow_behind_penalty,
             "distance_penalty": distance_penalty,
             "death_penalty": death_penalty,
+            "tilt_death_penalty": tilt_death_penalty,
+            "tilt_excess_penalty": tilt_excess_penalty,
             "tilt_forward_reward": tilt_forward_reward,
             "far_away_penalty": far_away_penalty,
             "failure_penalty": failure_penalty,
@@ -403,6 +830,7 @@ class DroneTargetTouchEnv(DirectRLEnv):
         )
 
         self._prev_distance_to_goal = distance_to_goal.detach()
+        self._best_distance_to_goal = torch.minimum(self._best_distance_to_goal, distance_to_goal.detach())
         self._prev_actions.copy_(self._actions.detach())
         for key, value in rewards.items():
             self._episode_sums[key] += value
@@ -416,8 +844,9 @@ class DroneTargetTouchEnv(DirectRLEnv):
         """
         time_out = self.episode_length_buf >= self.max_episode_length - 1
 
-        died_by_height = self._robot.data.root_pos_w[:, 2] < float(getattr(self.cfg, "died_height_threshold", 0.3))
-        died = died_by_height | self._get_ground_contact_mask()
+        died_by_height = self._get_logical_root_z() < float(getattr(self.cfg, "died_height_threshold", 0.3))
+        died_by_tilt = self._get_tilt_exceeded_mask()
+        died = died_by_height | self._get_ground_contact_mask() | died_by_tilt
         distance_to_goal = torch.linalg.norm(self._desired_pos_w - self._robot.data.root_pos_w, dim=1)
         far_away = distance_to_goal > self.cfg.far_away_termination_distance
         touched = distance_to_goal <= self._get_touch_threshold()
@@ -444,8 +873,9 @@ class DroneTargetTouchEnv(DirectRLEnv):
         )
         touched_mask = distance_to_goal_all <= self._get_touch_threshold()
         far_away_mask = distance_to_goal_all > self.cfg.far_away_termination_distance
-        died_by_height_mask = self._robot.data.root_pos_w[env_ids, 2] < float(getattr(self.cfg, "died_height_threshold", 0.3))
-        died_mask = died_by_height_mask | self._get_ground_contact_mask(env_ids)
+        died_by_height_mask = self._get_logical_root_z(env_ids) < float(getattr(self.cfg, "died_height_threshold", 0.3))
+        died_by_tilt_mask = self._get_tilt_exceeded_mask(env_ids)
+        died_mask = died_by_height_mask | self._get_ground_contact_mask(env_ids) | died_by_tilt_mask
         desired_pos_b_env, _ = subtract_frame_transforms(
             self._robot.data.root_pos_w[env_ids],
             self._robot.data.root_quat_w[env_ids],
@@ -458,7 +888,7 @@ class DroneTargetTouchEnv(DirectRLEnv):
         extras = {}
         for key in self._episode_sums.keys():
             episodic_sum_avg = torch.mean(self._episode_sums[key][env_ids])
-            extras["Episode_Reward/" + key] = episodic_sum_avg / self.max_episode_length_s
+            # 僅保留 raw reward 統計，避免重複輸出正規化版 Episode_Reward。
             extras["Episode_RewardRaw/" + key] = episodic_sum_avg
             self._episode_sums[key][env_ids] = 0.0
 
@@ -489,11 +919,18 @@ class DroneTargetTouchEnv(DirectRLEnv):
 
         self._actions[env_ids] = 0.0
         self._prev_actions[env_ids] = 0.0
+        # 目標高度範圍預設沿用低空設定；展示環境可把它整段抬到建物上空。
+        target_spawn_z_min = float(getattr(self.cfg, "target_spawn_z_min", 0.5))
+        target_spawn_z_max = float(getattr(self.cfg, "target_spawn_z_max", 5.0))
+        if target_spawn_z_min > target_spawn_z_max:
+            target_spawn_z_min, target_spawn_z_max = target_spawn_z_max, target_spawn_z_min
 
         # 先做預設目標取樣；若啟用 target distance 規則，後面會覆寫 XY。
         self._desired_pos_w[env_ids, :2] = torch.zeros_like(self._desired_pos_w[env_ids, :2]).uniform_(-5.0, 5.0)
         self._desired_pos_w[env_ids, :2] += self._terrain.env_origins[env_ids, :2]
-        self._desired_pos_w[env_ids, 2] = torch.zeros_like(self._desired_pos_w[env_ids, 2]).uniform_(0.5, 5.0)
+        self._desired_pos_w[env_ids, 2] = torch.zeros_like(self._desired_pos_w[env_ids, 2]).uniform_(
+            target_spawn_z_min, target_spawn_z_max
+        )
 
         joint_pos = self._robot.data.default_joint_pos[env_ids]
         joint_vel = self._robot.data.default_joint_vel[env_ids]
@@ -541,9 +978,17 @@ class DroneTargetTouchEnv(DirectRLEnv):
             device=default_root_state.device,
             dtype=default_root_state.dtype,
         ).uniform_(self.cfg.spawn_z_min, spawn_z_max)
-        default_root_state[:, 0] = self._terrain.env_origins[env_ids, 0] + spawn_xy[:, 0]
-        default_root_state[:, 1] = self._terrain.env_origins[env_ids, 1] + spawn_xy[:, 1]
-        default_root_state[:, 2] = spawn_z
+        height_offset = self._get_visual_altitude_offset()
+        if bool(getattr(self.cfg, "scene_anchor_enabled", False)) and self._scene_anchor_centers_w is not None:
+            anchor_spawn_xy = self._sample_scene_anchor_spawn_xy(env_ids, dtype=default_root_state.dtype)
+            default_root_state[:, 0] = anchor_spawn_xy[:, 0]
+            default_root_state[:, 1] = anchor_spawn_xy[:, 1]
+        else:
+            default_root_state[:, 0] = self._terrain.env_origins[env_ids, 0] + spawn_xy[:, 0]
+            default_root_state[:, 1] = self._terrain.env_origins[env_ids, 1] + spawn_xy[:, 1]
+        default_root_state[:, 2] = self._terrain.env_origins[env_ids, 2] + spawn_z + height_offset
+        # 展示模式可把觀測原點固定在本回合重生點，避免把公里級絕對 x/y 餵給 Stage4 policy。
+        self._observation_local_origin_xy[env_ids] = default_root_state[:, :2]
         target_dist_min = getattr(self.cfg, "target_spawn_distance_min", None)
         target_dist_max = getattr(self.cfg, "target_spawn_distance_max", None)
         if target_dist_min is not None and target_dist_max is not None:
@@ -632,9 +1077,26 @@ class DroneTargetTouchEnv(DirectRLEnv):
             ).uniform_(min_dist, max_dist)
             self._desired_pos_w[env_ids, 0] = default_root_state[:, 0] + target_radius * torch.cos(target_theta)
             self._desired_pos_w[env_ids, 1] = default_root_state[:, 1] + target_radius * torch.sin(target_theta)
-            self._desired_pos_w[env_ids, 2] = torch.zeros_like(self._desired_pos_w[env_ids, 2]).uniform_(0.5, 5.0)
-            self._last_respawn_target_dist[env_ids] = target_radius
+            self._desired_pos_w[env_ids, 2] = torch.zeros_like(self._desired_pos_w[env_ids, 2]).uniform_(
+                target_spawn_z_min, target_spawn_z_max
+            )
+            self._desired_pos_w[env_ids, 2] += self._terrain.env_origins[env_ids, 2] + height_offset
+            if bool(getattr(self.cfg, "scene_anchor_enabled", False)):
+                target_extra_clearance = float(getattr(self.cfg, "scene_anchor_target_extra_clearance_m", 0.0))
+                self._desired_pos_w[env_ids] = self._enforce_scene_anchor_clearance(
+                    self._desired_pos_w[env_ids], env_ids, target_extra_clearance
+                )
+                self._last_respawn_target_dist[env_ids] = torch.linalg.norm(
+                    self._desired_pos_w[env_ids] - default_root_state[:, :3], dim=1
+                )
+            else:
+                self._last_respawn_target_dist[env_ids] = target_radius
         else:
+            self._desired_pos_w[env_ids, 2] += self._terrain.env_origins[env_ids, 2] + height_offset
+            if bool(getattr(self.cfg, "scene_anchor_enabled", False)):
+                self._desired_pos_w[env_ids] = self._enforce_scene_anchor_clearance(
+                    self._desired_pos_w[env_ids], env_ids
+                )
             self._last_respawn_target_dist[env_ids] = torch.linalg.norm(
                 self._desired_pos_w[env_ids] - default_root_state[:, :3], dim=1
             )
@@ -644,6 +1106,7 @@ class DroneTargetTouchEnv(DirectRLEnv):
         self._prev_distance_to_goal[env_ids] = torch.linalg.norm(
             self._desired_pos_w[env_ids] - default_root_state[:, :3], dim=1
         )
+        self._best_distance_to_goal[env_ids] = self._prev_distance_to_goal[env_ids]
         self._term_touched[env_ids] = False
 
     def _reset_idx(self, env_ids: torch.Tensor | None):
@@ -655,10 +1118,14 @@ class DroneTargetTouchEnv(DirectRLEnv):
         if debug_vis:
             if not hasattr(self, "goal_pos_visualizer"):
                 marker_cfg = CUBOID_MARKER_CFG.copy()
-                # 以立方體顯示觸碰門檻（邊長 = 2 * threshold）。
-                touch_diameter = self._get_touch_threshold() * 2.0
-                marker_scale = 0.9
-                marker_size = touch_diameter * marker_scale
+                # 若 cfg 指定固定邊長，則方塊顯示和實際 threshold 脫鉤；否則沿用 threshold 顯示。
+                marker_edge_length = getattr(self.cfg, "touch_marker_edge_length", None)
+                if marker_edge_length is None:
+                    touch_diameter = self._get_touch_threshold() * 2.0
+                    marker_scale = 0.9
+                    marker_size = touch_diameter * marker_scale
+                else:
+                    marker_size = float(marker_edge_length)
                 marker_cfg.markers["cuboid"].size = (marker_size, marker_size, marker_size)
                 marker_cfg.prim_path = "/Visuals/Command/goal_position"
                 self.goal_pos_visualizer = VisualizationMarkers(marker_cfg)
@@ -706,7 +1173,7 @@ class DroneTargetTouchTestEnv(DroneTargetTouchEnv):
         distance_to_goal = torch.linalg.norm(
             self._desired_pos_w[log_env_ids] - self._robot.data.root_pos_w[log_env_ids], dim=1
         )
-        died_by_height = self._robot.data.root_pos_w[log_env_ids, 2] < float(getattr(self.cfg, "died_height_threshold", 0.3))
+        died_by_height = self._get_logical_root_z(log_env_ids) < float(getattr(self.cfg, "died_height_threshold", 0.3))
         died_by_ground = self._get_ground_contact_mask(log_env_ids)
         died_by_tilt = self._get_tilt_exceeded_mask(log_env_ids)
         died_mask = died_by_height | died_by_ground | died_by_tilt

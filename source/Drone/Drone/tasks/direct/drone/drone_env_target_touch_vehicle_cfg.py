@@ -11,6 +11,7 @@ from isaaclab.utils import configclass
 
 from .config.drone import DRONE_CFG
 from .drone_env_target_touch_cfg import DroneTargetTouchEnvWindow
+from .drone_env_target_touch_moving_cfg import DroneTargetTouchMovingEnvCfg
 
 
 @configclass
@@ -87,6 +88,8 @@ class DroneTargetTouchVehicleBaseEnvCfg(DirectRLEnvCfg):
     distance_to_goal_reward_scale = 10.0
     # 朝目標前進速度的正向獎勵權重。
     approach_reward_scale = 0.1
+    # 速度接近獎勵權重：朝目標前進速度 × 距離接近度（越近且越快越高）。
+    speed_to_goal_reward_scale = 0.0
     # 控制命令懲罰（角速度命令幅度）係數。
     tcmd_lambda_4 = 1e-3
     # 控制命令懲罰（動作變化量）係數。
@@ -135,6 +138,12 @@ class DroneTargetTouchVehicleBaseEnvCfg(DirectRLEnvCfg):
     near_touch_outer_radius = 0.75
     near_touch_hover_speed_threshold = 0.12
     near_touch_vel_penalty_min_scale = 0.2
+    # 近目標推進獎勵（目標附近仍朝目標前進時加分）；預設關閉。
+    near_touch_push_reward_scale = 0.0
+    # 反跟隨懲罰：在指定距離內若接近速度不足，視為「只跟隨不追上」而扣分。
+    follow_behind_penalty_scale = 0.0
+    follow_behind_outer_radius = 12.0
+    follow_behind_min_approach_speed = 0.0
 
     # spawn ranges (relative to env origin)
     # Vehicle 系列固定在 env 原點的 XY 重生（不再隨機平移）。
@@ -256,6 +265,55 @@ class DroneTargetTouchVehicleStage2EnvCfg(DroneTargetTouchVehicleBaseEnvCfg):
     distance_to_goal_tanh_scale = 28.0
     # Stage2 failed_no_touch 懲罰加重。
     failure_penalty = 300.0
+
+
+@configclass
+class DroneTargetTouchVehicleStage3MovingEnvCfg(DroneTargetTouchMovingEnvCfg):
+    """Vehicle touch Stage3：移動目標版本（承接 Stage1/2 已收斂策略）。"""
+
+    # 與 Vehicle 系列對齊：使用 25 維擴展觀測。
+    observation_space = 25
+    use_extended_observation = True
+    # 重生規則與 Stage1/2 對齊（單次 reset 分佈一致，只是目標會移動）。
+    spawn_xy_min = -5.0
+    spawn_xy_max = 5.0
+    spawn_z_min = 1.0
+    spawn_z_max = 5.0
+    target_spawn_distance_min = 20.0
+    target_spawn_distance_max = 50.0
+    # 2026-03-04_09-32-38 訓練快照對齊。
+    target_distance_curriculum_enabled = False
+    target_distance_curriculum_mode = "vector_steps"
+    target_distance_curriculum_stages = None
+    target_distance_curriculum_stage_end_steps = None
+
+    ang_vel_reward_scale = -0.002
+    distance_penalty_only_when_not_approaching = False
+    terminate_on_ground_contact = False
+    death_penalty = 300.0
+    failure_penalty = 300.0
+    far_away_penalty = 200.0
+    far_away_termination_distance = 80.0
+    touch_bonus_reward = 400.0
+    near_touch_outer_radius = 0.75
+    approach_reward_scale = 0.1
+    distance_to_goal_reward_scale = 18.0
+    distance_penalty_scale = 0.2
+    time_penalty_scale = 0.20
+    tcmd_lambda_4 = 5e-3
+    tcmd_lambda_5 = 5e-4
+    distance_to_goal_tanh_scale = 3.2
+
+    # Stage3 目標會移動：使用 5 m/s。
+    moving_target_speed = 5.0
+    moving_target_turn_rate_limit = 1.2
+    moving_target_no_instant_reverse = True
+    moving_target_vertical_dir_scale = 0.6
+    moving_target_z_wave_amplitude = 0.2
+    moving_target_z_wave_period_s = 8.0
+    moving_target_z_min = 0.5
+    moving_target_z_max = 5.0
+
 
 
 @configclass

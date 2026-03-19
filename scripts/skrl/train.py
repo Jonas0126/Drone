@@ -68,7 +68,12 @@ parser.add_argument(
 )
 parser.add_argument("--debug_cam", action="store_true", default=False, help="Enable debug depth camera capture mode.")
 parser.add_argument("--debug_collision", action="store_true", default=False, help="Enable debug collision mode.")
-parser.add_argument("--finetune", action="store_true", default=False, help="Enable fine-tuning mode (Stage2 only).")
+parser.add_argument(
+    "--finetune",
+    action="store_true",
+    default=False,
+    help="Enable fine-tuning mode (Stage1/Stage2/Stage3 only).",
+)
 parser.add_argument(
     "--reset-state-preprocessor",
     dest="reset_state_preprocessor",
@@ -325,8 +330,11 @@ else:
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: dict):
     """Train with skrl agent."""
     if args_cli.finetune:
-        if not (args_cli.task and "Stage2" in args_cli.task):
-            raise ValueError("--finetune is restricted to Stage2 tasks only")
+        allowed = bool(
+            args_cli.task and (("Stage1" in args_cli.task) or ("Stage2" in args_cli.task) or ("Stage3" in args_cli.task))
+        )
+        if not allowed:
+            raise ValueError("--finetune is restricted to Stage1/Stage2/Stage3 tasks only")
         if not args_cli.ml_framework.startswith("torch"):
             raise ValueError("--finetune currently supports only torch backend")
 

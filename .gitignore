@@ -1,0 +1,10 @@
+# Python cache / local tooling noise
+**/__pycache__/
+**/*.pyc
+
+# Taipei demo USD assets are large imported scene files and textures.
+# Keep env code/config in git, but do not commit these heavyweight binaries.
+/source/Drone/Drone/tasks/direct/drone/assets/Taipei_building_demo.usdc
+/source/Drone/Drone/tasks/direct/drone/assets/Taipei_demo_001.usd
+/source/Drone/Drone/tasks/direct/drone/assets/color.usd
+/source/Drone/Drone/tasks/direct/drone/assets/SubUSDs/

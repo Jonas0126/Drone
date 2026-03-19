@@ -183,3 +183,191 @@ gym.register(
         "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_target_touch_vehicle_stage2_cfg.yaml",
     },
 )
+
+gym.register(
+    id="Drone-Direct-Target-Touch-Vehicle-Moving-Pre-v0",
+    entry_point=f"{__name__}.drone_env_target_touch_vehicle:DroneTargetTouchVehicleEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.drone_env_target_touch_vehicle_cfg:DroneTargetTouchVehicleStage0EnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_target_touch_vehicle_moving_pre_cfg.yaml",
+    },
+)
+
+gym.register(
+    id="Drone-Direct-Target-Touch-Vehicle-Moving-Pre-Test-v0",
+    entry_point=f"{__name__}.drone_env_target_touch_vehicle:DroneTargetTouchVehicleTestEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.drone_env_target_touch_vehicle_cfg:DroneTargetTouchVehicleStage0EnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_target_touch_vehicle_moving_pre_cfg.yaml",
+    },
+)
+
+gym.register(
+    id="Drone-Direct-Target-Touch-Vehicle-Moving-Stage0-v0",
+    entry_point=f"{__name__}.drone_env_target_touch_vehicle_moving:DroneTargetTouchVehicleMovingEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.drone_env_target_touch_vehicle_moving_cfg:DroneTargetTouchVehicleMovingStage0EnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_target_touch_vehicle_moving_stage0_cfg.yaml",
+    },
+)
+
+gym.register(
+    id="Drone-Direct-Target-Touch-Vehicle-Moving-Stage0-Test-v0",
+    entry_point=f"{__name__}.drone_env_target_touch_vehicle_moving:DroneTargetTouchVehicleMovingTestEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.drone_env_target_touch_vehicle_moving_cfg:DroneTargetTouchVehicleMovingStage0TestEnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_target_touch_vehicle_moving_stage0_cfg.yaml",
+    },
+)
+
+gym.register(
+    id="Drone-Direct-Target-Touch-Vehicle-Moving-Stage1-v0",
+    entry_point=f"{__name__}.drone_env_target_touch_vehicle_moving:DroneTargetTouchVehicleMovingEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.drone_env_target_touch_vehicle_moving_cfg:DroneTargetTouchVehicleMovingStage1EnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_target_touch_vehicle_moving_stage1_cfg.yaml",
+    },
+)
+
+gym.register(
+    id="Drone-Direct-Target-Touch-Vehicle-Moving-Stage1-Test-v0",
+    entry_point=f"{__name__}.drone_env_target_touch_vehicle_moving:DroneTargetTouchVehicleMovingTestEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.drone_env_target_touch_vehicle_moving_cfg:DroneTargetTouchVehicleMovingStage1TestEnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_target_touch_vehicle_moving_stage1_cfg.yaml",
+    },
+)
+
+gym.register(
+    id="Drone-Direct-Target-Touch-Vehicle-Moving-Stage2-v0",
+    entry_point=f"{__name__}.drone_env_target_touch_vehicle_moving:DroneTargetTouchVehicleMovingEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.drone_env_target_touch_vehicle_moving_cfg:DroneTargetTouchVehicleMovingStage2EnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_target_touch_vehicle_moving_stage2_cfg.yaml",
+    },
+)
+
+gym.register(
+    id="Drone-Direct-Target-Touch-Vehicle-Moving-Stage2-Test-v0",
+    entry_point=f"{__name__}.drone_env_target_touch_vehicle_moving:DroneTargetTouchVehicleMovingTestEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.drone_env_target_touch_vehicle_moving_cfg:DroneTargetTouchVehicleMovingStage2TestEnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_target_touch_vehicle_moving_stage2_cfg.yaml",
+    },
+)
+
+gym.register(
+    id="Drone-Direct-Target-Touch-Vehicle-Moving-Stage3-v0",
+    entry_point=f"{__name__}.drone_env_target_touch_vehicle_moving:DroneTargetTouchVehicleMovingEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.drone_env_target_touch_vehicle_moving_cfg:DroneTargetTouchVehicleMovingStage3EnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_target_touch_vehicle_moving_stage3_cfg.yaml",
+    },
+)
+
+gym.register(
+    id="Drone-Direct-Target-Touch-Vehicle-Moving-Stage3-Test-v0",
+    entry_point=f"{__name__}.drone_env_target_touch_vehicle_moving:DroneTargetTouchVehicleMovingTestEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.drone_env_target_touch_vehicle_moving_cfg:DroneTargetTouchVehicleMovingStage3TestEnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_target_touch_vehicle_moving_stage3_cfg.yaml",
+    },
+)
+
+gym.register(
+    id="Drone-Direct-Target-Touch-Vehicle-Moving-Stage4-v0",
+    entry_point=f"{__name__}.drone_env_target_touch_vehicle_moving:DroneTargetTouchVehicleMovingEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.drone_env_target_touch_vehicle_moving_cfg:DroneTargetTouchVehicleMovingStage4EnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_target_touch_vehicle_moving_stage4_cfg.yaml",
+    },
+)
+
+gym.register(
+    id="Drone-Direct-Target-Touch-Vehicle-Moving-Stage4-Test-v0",
+    entry_point=f"{__name__}.drone_env_target_touch_vehicle_moving:DroneTargetTouchVehicleMovingTestEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.drone_env_target_touch_vehicle_moving_cfg:DroneTargetTouchVehicleMovingStage4TestEnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_target_touch_vehicle_moving_stage4_cfg.yaml",
+    },
+)
+
+gym.register(
+    id="Drone-Direct-Target-Touch-Vehicle-Moving-Stage4-Taipei-Demo-Test-v0",
+    entry_point=f"{__name__}.drone_env_target_touch_vehicle_moving:DroneTargetTouchVehicleMovingTestEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.drone_env_target_touch_vehicle_moving_cfg:"
+            "DroneTargetTouchVehicleMovingStage4TaipeiDemoTestEnvCfg"
+        ),
+        # 展示環境沿用 Stage4 agent 設定，確保展示行為與既有模型相容。
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_target_touch_vehicle_moving_stage4_cfg.yaml",
+    },
+)
+
+gym.register(
+    id="Drone-Direct-Target-Touch-Vehicle-Moving-Stage5-v0",
+    entry_point=f"{__name__}.drone_env_target_touch_vehicle_moving:DroneTargetTouchVehicleMovingEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.drone_env_target_touch_vehicle_moving_cfg:DroneTargetTouchVehicleMovingStage5EnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_target_touch_vehicle_moving_stage5_cfg.yaml",
+    },
+)
+
+gym.register(
+    id="Drone-Direct-Target-Touch-Vehicle-Moving-Stage5-Test-v0",
+    entry_point=f"{__name__}.drone_env_target_touch_vehicle_moving:DroneTargetTouchVehicleMovingTestEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.drone_env_target_touch_vehicle_moving_cfg:DroneTargetTouchVehicleMovingStage5TestEnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_target_touch_vehicle_moving_stage5_cfg.yaml",
+    },
+)
+
+gym.register(
+    id="Drone-Direct-Target-Touch-Vehicle-Moving-Stage5-Taipei-Demo-Test-v0",
+    entry_point=f"{__name__}.drone_env_target_touch_vehicle_moving:DroneTargetTouchVehicleMovingTestEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": (
+            f"{__name__}.drone_env_target_touch_vehicle_moving_cfg:"
+            "DroneTargetTouchVehicleMovingStage5TaipeiDemoTestEnvCfg"
+        ),
+        # 展示環境沿用 Stage5 agent 設定，確保台北 demo 直接吃 Stage5 規則與模型。
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_target_touch_vehicle_moving_stage5_cfg.yaml",
+    },
+)
+
+gym.register(
+    id="Drone-Direct-Target-Touch-Vehicle-Stage3-v0",
+    entry_point=f"{__name__}.drone_env_target_touch_moving:DroneTargetTouchMovingEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.drone_env_target_touch_vehicle_cfg:DroneTargetTouchVehicleStage3MovingEnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_target_touch_vehicle_stage3_cfg.yaml",
+    },
+)
+
+gym.register(
+    id="Drone-Direct-Target-Touch-Vehicle-Stage3-Test-v0",
+    entry_point=f"{__name__}.drone_env_target_touch_moving:DroneTargetTouchMovingTestEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.drone_env_target_touch_vehicle_cfg:DroneTargetTouchVehicleStage3MovingEnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_target_touch_vehicle_stage3_cfg.yaml",
+    },
+)

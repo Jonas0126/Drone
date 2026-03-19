@@ -26,6 +26,11 @@ class DroneTargetTouchMovingEnv(DroneTargetTouchEnv):
         # 記錄前一時刻的移動方向，避免目標突然反向或急轉彎。
         self._target_dir_w = torch.zeros(self.num_envs, 3, device=self.device)
         self._target_z_phase = torch.zeros(self.num_envs, device=self.device)
+        # 每回合「曾經最接近目標」的距離（m），供測試統計輸出。
+        self._episode_min_distance = torch.full((self.num_envs,), float("inf"), device=self.device)
+        # vector-step 課程計數（每次 env.step() +1）。
+        self._vector_step_count = 0
+        self._target_dist_curriculum_stage_idx = -1
 
     def _update_moving_targets(self, env_ids: torch.Tensor):
         """更新指定環境的目標位置。
@@ -96,12 +101,69 @@ class DroneTargetTouchMovingEnv(DroneTargetTouchEnv):
 
     def _pre_physics_step(self, actions: torch.Tensor):
         """物理步進前先更新移動目標，再套用動作。"""
+        self._vector_step_count += 1
         self._update_moving_targets(self._robot._ALL_INDICES)
+        # 追蹤每個環境在本回合內距離目標的最小值。
+        distance_to_goal = torch.linalg.norm(self._desired_pos_w - self._robot.data.root_pos_w, dim=1)
+        self._episode_min_distance = torch.minimum(self._episode_min_distance, distance_to_goal)
         super()._pre_physics_step(actions)
+
+    def _resolve_moving_target_dist_curriculum_range(self) -> tuple[float, float] | None:
+        """Resolve target respawn distance by vector-step curriculum (if enabled)."""
+        if not bool(getattr(self.cfg, "target_distance_curriculum_enabled", False)):
+            return None
+
+        mode = str(getattr(self.cfg, "target_distance_curriculum_mode", "")).lower()
+        if mode not in ("vector_step", "vector_steps", "timestep", "timesteps"):
+            return None
+
+        stages_cfg = getattr(self.cfg, "target_distance_curriculum_stages", None)
+        if not stages_cfg:
+            return None
+
+        stages = [(float(s[0]), float(s[1])) for s in stages_cfg]
+        stage_count = len(stages)
+        stage_idx = stage_count - 1
+
+        end_steps_cfg = getattr(self.cfg, "target_distance_curriculum_stage_end_steps", None)
+        if end_steps_cfg and len(end_steps_cfg) == stage_count - 1:
+            end_steps = [max(0, int(x)) for x in end_steps_cfg]
+            for i, end_step in enumerate(end_steps):
+                if self._vector_step_count < end_step:
+                    stage_idx = i
+                    break
+
+        min_dist, max_dist = stages[stage_idx]
+        if min_dist > max_dist:
+            min_dist, max_dist = max_dist, min_dist
+
+        if stage_idx != self._target_dist_curriculum_stage_idx:
+            self._target_dist_curriculum_stage_idx = stage_idx
+            print(
+                f"[CURRICULUM][MovingTargetDist][vector_steps] step={self._vector_step_count} "
+                f"stage={stage_idx + 1}/{stage_count} range={min_dist:.1f}~{max_dist:.1f}m",
+                flush=True,
+            )
+        return min_dist, max_dist
 
     def _reset_idx_impl(self, env_ids: torch.Tensor | None, spread_episode_resets: bool):
         """重置時沿用父類流程，並清空目標速度。"""
-        super()._reset_idx_impl(env_ids, spread_episode_resets)
+        # 若啟用 vector-step target curriculum，暫時覆寫目標重生距離。
+        original_min = getattr(self.cfg, "target_spawn_distance_min", None)
+        original_max = getattr(self.cfg, "target_spawn_distance_max", None)
+        original_enabled = bool(getattr(self.cfg, "target_distance_curriculum_enabled", False))
+        try:
+            stage_range = self._resolve_moving_target_dist_curriculum_range()
+            if stage_range is not None:
+                self.cfg.target_spawn_distance_min = float(stage_range[0])
+                self.cfg.target_spawn_distance_max = float(stage_range[1])
+                # 關閉父類 reset-step 課程，避免雙重課程。
+                self.cfg.target_distance_curriculum_enabled = False
+            super()._reset_idx_impl(env_ids, spread_episode_resets)
+        finally:
+            self.cfg.target_spawn_distance_min = original_min
+            self.cfg.target_spawn_distance_max = original_max
+            self.cfg.target_distance_curriculum_enabled = original_enabled
 
         if env_ids is None or len(env_ids) == self.num_envs:
             env_ids = self._robot._ALL_INDICES
@@ -109,6 +171,7 @@ class DroneTargetTouchMovingEnv(DroneTargetTouchEnv):
         self._target_velocity_w[env_ids] = 0.0
         self._target_dir_w[env_ids] = 0.0
         self._target_z_phase[env_ids] = torch.rand(len(env_ids), device=self.device) * 2.0 * torch.pi
+        self._episode_min_distance[env_ids] = float("inf")
 
 
 class DroneTargetTouchMovingTestEnv(DroneTargetTouchMovingEnv):
@@ -142,6 +205,12 @@ class DroneTargetTouchMovingTestEnv(DroneTargetTouchMovingEnv):
         died_mask = died_by_height | died_by_contact
         touched_mask = self._term_touched[test_env_ids]
         touched_count = int(touched_mask.sum().item())
+        min_dist_batch = self._episode_min_distance[test_env_ids]
+        min_dist_summary = (
+            f"closest_dist={float(min_dist_batch.mean().item()):.3f}"
+            f"(min:{float(min_dist_batch.min().item()):.3f},"
+            f"max:{float(min_dist_batch.max().item()):.3f})"
+        )
         died_count = int(died_mask.sum().item())
         if died_count > 0:
             died_heights = self._robot.data.root_pos_w[test_env_ids, 2][died_mask]
@@ -163,6 +232,7 @@ class DroneTargetTouchMovingTestEnv(DroneTargetTouchMovingEnv):
                 f"max_steps={float(touched_steps.max().item()):.1f}, "
                 f"total_rate={total_success_rate:.3f}, "
                 f"total_avg_steps={total_avg_steps:.1f}, "
+                f"{min_dist_summary}, "
                 f"{reason_summary}",
                 flush=True,
             )
@@ -171,6 +241,7 @@ class DroneTargetTouchMovingTestEnv(DroneTargetTouchMovingEnv):
                 "[TEST][MovingTouch] count=0, "
                 f"total_rate={total_success_rate:.3f}, "
                 f"total_avg_steps={self._test_total_success_steps / max(self._test_total_success, 1):.1f}, "
+                f"{min_dist_summary}, "
                 f"{reason_summary}",
                 flush=True,
             )

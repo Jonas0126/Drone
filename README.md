@@ -1,273 +1,441 @@
-# Drone 任務環境總覽（外層 `source` 版本）
+# Drone 專案總覽
 
-本文件以目前外層程式碼為準：
-- `source/Drone/Drone/tasks/direct/drone/__init__.py`
-- `source/Drone/Drone/tasks/direct/drone/*.py`
+這份文件是給第一次接手這個專案的人看的。目的不是列出所有細節，而是讓你先快速理解：
 
-重點整理：
-1. 有哪些 Gym 環境（ID）。
-2. 每個環境在做什麼。
-3. 動作空間、觀察空間。
-4. 獎勵函數組成。
-5. 重生/終止規則與測試輸出。
+- 這個專案在做什麼
+- 目前主要在訓練哪一類任務
+- 專案裡哪些檔案是「設定」、哪些是「邏輯」、哪些是「歷史紀錄」
+- 想查環境、獎勵、模型、訓練指令時，該去哪裡找
 
 ---
 
-## 1) 環境清單（註冊 ID）
+## 1. 這個專案在做什麼
 
-### A. Basic 系列
-- `Drone-Direct-Basic-v0`
-- `Drone-Direct-Basic-Test-v0`
+這個專案是在 Isaac Lab / skrl 上訓練四軸無人機（drone）的強化學習任務。  
+目前主要目標是讓無人機在 3D 空間中追逐並碰觸一個移動目標，逐步從較簡單條件訓練到較困難條件。
 
-### B. Advanced 系列
-- `Drone-Direct-Advanced-v0`
-- `Drone-Direct-Advanced-Test-v0`
-- `Drone-Direct-Advanced-Level0-Test-v0` ~ `Drone-Direct-Advanced-Level5-Test-v0`
+目前你最常會碰到的是這條主線：
 
-### C. Target Touch（舊系列）
-- `Drone-Direct-Target-Touch-v0`
-- `Drone-Direct-Target-Touch-Test-v0`
+1. `Vehicle-Moving Pre`
+2. `Vehicle-Moving Stage0`
+3. `Vehicle-Moving Stage1`
+4. `Vehicle-Moving Stage2`
+5. `Vehicle-Moving Stage3`
 
-### D. Target Touch Moving（舊系列移動目標）
-- `Drone-Direct-Target-Touch-Moving-v0`
-- `Drone-Direct-Target-Touch-Moving-Test-v0`
-- `Drone-Direct-Target-Touch-Moving-Fast-v0`
-- `Drone-Direct-Target-Touch-Moving-Fast-Test-v0`
+這條主線的設計方向是：
 
-### E. Vehicle Touch Stage（新系列）
-- `Drone-Direct-Target-Touch-Vehicle-Stage0-v0`
-- `Drone-Direct-Target-Touch-Vehicle-Stage0-Test-v0`
-- `Drone-Direct-Target-Touch-Vehicle-Stage1-v0`
-- `Drone-Direct-Target-Touch-Vehicle-Stage1-Test-v0`
-- `Drone-Direct-Target-Touch-Vehicle-Stage2-v0`
-- `Drone-Direct-Target-Touch-Vehicle-Stage2-Test-v0`
-- `Drone-Direct-Target-Touch-Vehicle-Stage3-v0`
-- `Drone-Direct-Target-Touch-Vehicle-Stage3-Test-v0`
-- `Drone-Direct-Target-Touch-Vehicle-Stage4-v0`
-- `Drone-Direct-Target-Touch-Vehicle-Stage4-Test-v0`
-- `Drone-Direct-Target-Touch-Vehicle-Stage5-v0`
-- `Drone-Direct-Target-Touch-Vehicle-Stage5-Test-v0`
+- 目標物會移動
+- 不同 stage 會調整目標重生距離、目標速度、回合長度、終止條件
+- 用前一階段訓練好的 checkpoint 繼續 fine-tune 下一階段
 
-### F. Vehicle Moving（車輛風格移動目標）
-- `Drone-Direct-Target-Touch-Vehicle-Faster-v0`
-- `Drone-Direct-Target-Touch-Vehicle-Faster-Test-v0`
-- `Drone-Direct-Target-Touch-Vehicle-VeryFast-v0`
-- `Drone-Direct-Target-Touch-Vehicle-VeryFast-Test-v0`
-- `Drone-Direct-Target-Touch-Vehicle-UltraFast-v0`
-- `Drone-Direct-Target-Touch-Vehicle-UltraFast-Test-v0`
+簡單說，這不是一個單一環境，而是一組循序漸進的訓練環境。
 
 ---
 
-## 2) 動作空間（主要任務共通）
+## 2. 這個 repo 的結構怎麼看
 
-Target Touch / Moving / Vehicle 系列為 4 維動作：
+這個專案有兩層：
+
+- 外層：`/home/jonas/Drone`
+- 內層：`/home/jonas/Drone/Drone`
+
+實務上可以這樣理解：
+
+- 外層 repo：偏說明、工作紀錄、操作輔助
+- 內層 repo：真正的訓練程式碼與環境實作
+
+你平常要看環境邏輯、reward、終止條件、訓練腳本，幾乎都在內層 repo。
+
+最重要的路徑如下：
+
+- 內層主程式碼：
+  [`/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone`](/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone)
+- 內層訓練與播放腳本：
+  [`/home/jonas/Drone/Drone/scripts/skrl`](/home/jonas/Drone/Drone/scripts/skrl)
+- 歷史訓練紀錄與 checkpoint：
+  [`/home/jonas/Drone/Drone/logs/skrl`](/home/jonas/Drone/Drone/logs/skrl)
+- 已整理的模型紀錄：
+  [`/home/jonas/Drone/Drone/docs/trained_models.md`](/home/jonas/Drone/Drone/docs/trained_models.md)
+
+---
+
+## 3. 目前主要在用哪些環境
+
+雖然專案裡有很多任務系列，但目前主要在看的，是 `Vehicle-Moving` 這組：
+
+- `Drone-Direct-Target-Touch-Vehicle-Moving-Pre-v0`
+- `Drone-Direct-Target-Touch-Vehicle-Moving-Pre-Test-v0`
+- `Drone-Direct-Target-Touch-Vehicle-Moving-Stage0-v0`
+- `Drone-Direct-Target-Touch-Vehicle-Moving-Stage0-Test-v0`
+- `Drone-Direct-Target-Touch-Vehicle-Moving-Stage1-v0`
+- `Drone-Direct-Target-Touch-Vehicle-Moving-Stage1-Test-v0`
+- `Drone-Direct-Target-Touch-Vehicle-Moving-Stage2-v0`
+- `Drone-Direct-Target-Touch-Vehicle-Moving-Stage2-Test-v0`
+- `Drone-Direct-Target-Touch-Vehicle-Moving-Stage3-v0`
+- `Drone-Direct-Target-Touch-Vehicle-Moving-Stage3-Test-v0`
+
+這些環境的註冊位置在：
+- [`/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/__init__.py`](/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/__init__.py)
+
+如果你想知道某個 task ID 對應哪個 cfg class、哪個 Python 類別，先看這個檔案。
+
+---
+
+## 4. Vehicle-Moving 系列在做什麼
+
+這系列任務的核心目標是：
+
+- 無人機從某個起始位置出生
+- 目標物會在空中持續移動
+- policy 要控制無人機追上目標並碰觸它
+- 若撞地、掉太低、太遠、或某些 stage 設定下傾角過大，就會提早終止
+
+和靜態目標環境相比，`Vehicle-Moving` 多了這些難點：
+
+- 目標本身在動
+- 追擊過程中要持續修正方向
+- 距離越遠，reward 訊號越稀疏
+- 太激進時容易翻車或撞地
+
+因此訓練策略通常是：
+
+1. 先用較短距離、較低速度學會追擊
+2. 再逐步增加重生距離
+3. 最後再把目標速度拉高
+
+---
+
+## 5. 動作空間與觀察空間
+
+### 5.1 動作空間
+
+這系列主要是 4 維動作：
+
 - `a[0]`：總推力命令
-- `a[1:4]`：三軸力矩命令
+- `a[1]`：roll 力矩
+- `a[2]`：pitch 力矩
+- `a[3]`：yaw 力矩
 
-映射方式（`drone_env_target_touch.py`）：
-- `actions` 先 clamp 到 `[-1, 1]`
-- 推力：`thrust_z = thrust_to_weight * weight * (a0 + 1) / 2`
-- 力矩：`moment_xyz = moment_scale * a[1:4]`
+實作位置：
+- [`/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/drone_env_target_touch.py`](/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/drone_env_target_touch.py)
 
-目前設定（Touch/Vehicle 基礎）：
+目前常見基礎設定：
+
 - `thrust_to_weight = 4`
 - `moment_scale = 0.05`
 
-Basic/Advanced 也是 4 維控制，但 Basic 系列 `thrust_to_weight=2.5`。
+### 5.2 觀察空間
+
+`Vehicle-Moving` 目前主要使用 25 維擴展觀察。
+
+觀察大致包含：
+
+- 無人機位置
+- 無人機線速度
+- 無人機角速度
+- 姿態旋轉矩陣
+- 目標位置
+- 上一步動作
+
+對應設定檔：
+- [`/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/drone_env_target_touch_vehicle_moving_cfg.py`](/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/drone_env_target_touch_vehicle_moving_cfg.py)
+
+對應組裝邏輯：
+- [`/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/drone_env_target_touch.py`](/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/drone_env_target_touch.py)
 
 ---
 
-## 3) 觀察空間
+## 6. Vehicle-Moving 系列的環境設定怎麼看
 
-## 3.1 Basic（`observation_space=30`）
-由下列組成：
-- `root_lin_vel_b` (3)
-- `root_ang_vel_b` (3)
-- `projected_gravity_b` (3)
-- `desired_pos_b` (3)
-- `goal_dist` (1)
-- `goal_dir` (3)
-- `last_action` (4)
-- 深度特徵（前後相機，各 5 維）共 10 維
+最重要的設定檔是：
 
-合計：30。
+- [`/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/drone_env_target_touch_vehicle_moving_cfg.py`](/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/drone_env_target_touch_vehicle_moving_cfg.py)
 
-## 3.2 Advanced（`observation_space=40`）
-和 Basic 類似，但深度改四方向相機（前後左右），每個 5 維，共 20 維。
+這個檔案裡分成：
 
-## 3.3 Target Touch（舊系列）
-支援兩種觀察：
-- 12 維（預設）：
-  - `root_lin_vel_b(3) + root_ang_vel_b(3) + projected_gravity_b(3) + desired_pos_b(3)`
-- 25 維（擴展）：
-  - `root_pos + root_lin_vel_w + root_ang_vel_w + rot_mat(9) + desired_pos + last_action`
-  - 目前實作中擴展版位置已用相對環境原點（`*_rel`）
+- `BaseEnvCfg`
+- `Pre`
+- `Stage0`
+- `Stage1`
+- `Stage2`
+- `Stage3`
+- 各自的 `TestEnvCfg`
 
-## 3.4 Vehicle Stage0/Stage1
-目前在 cfg 中明確使用 25 維擴展觀察。
+你在這裡最常查的欄位有：
 
----
+- `episode_length_s`
+- `target_spawn_distance_min`
+- `target_spawn_distance_max`
+- `moving_target_speed`
+- `far_away_termination_distance`
+- `enable_tilt_limit_termination`
+- `max_tilt_deg`
+- `distance_to_goal_tanh_scale`
+- `distance_to_goal_reward_scale`
+- `approach_reward_scale`
+- `progress_reward_scale`
 
-## 4) 獎勵函數組成
+### 6.1 目前 Stage3（依目前程式碼）
 
-## 4.1 Basic 獎勵（`drone_env_basic.py`）
-主要組成：
-- `r_progress = 4.0 * clamp(prev_dist - dist, -1, 1)`
-- `r_time = -0.5 * dt`
-- `r_hover`：接近目標時，低速懸停給分
-- `r_ctrl = -0.05 * ||action||^2`
+目前內層程式碼中的 `Stage3EnvCfg` 是一個「長距離、慢速過渡版」：
 
-總和：`reward = r_progress + r_time + r_hover + r_ctrl`
+- `episode_length_s = 180.0`
+- `target_spawn_distance_min/max = 20.0 / 100.0`
+- `moving_target_speed = 3.0`
+- `far_away_termination_distance = 130.0`
+- `enable_tilt_limit_termination = true`
+- `max_tilt_deg = 55.0`
+- `distance_to_goal_tanh_scale = 12.0`
 
-## 4.2 Advanced 獎勵（`drone_env_advanced.py`）
-在 Basic 基礎上更強化平穩與姿態：
-- `r_progress`
-- `r_time`
-- `r_lin_vel`（線速度懲罰）
-- `r_ang_vel`（角速度懲罰）
-- `r_tilt`（傾斜懲罰）
-- `r_ctrl`（控制成本）
-- `r_hover`（近目標穩定懸停）
-
-## 4.3 Target Touch / Moving / Vehicle（共用 `drone_env_target_touch.py`）
-
-目前為「舊版 touch reward 組成」：
-- `lin_vel`：線速度平方懲罰（可縮放）
-- `ang_vel`：角速度平方懲罰（可縮放）
-- `distance_to_goal`：`1 - tanh(distance / distance_to_goal_tanh_scale)`
-- `touch_bonus`：碰觸成功一次性獎勵
-- `touch_early_bonus`：越早碰觸額外加分（未設則為 0）
-- `approach_reward`：朝目標方向速度正向獎勵（只取 `approach_speed>0`）
-- `tcmd_penalty`：
-  - `r_tcmd = λ4 * ||a_omega,t|| + λ5 * ||a_t-a_{t-1}||^2`
-  - 實際以負號加入總獎勵（懲罰）
-- `time_penalty`：每步固定扣分
-- `near_touch_hover_penalty`：近目標但不碰且低速時懲罰（未設則可為 0）
-- `distance_penalty`：`-distance_penalty_scale * distance * dt`
-- `death_penalty`：死亡懲罰
-- `tilt_forward_reward`：傾角軟引導（可關閉）
-- `far_away_penalty`：太遠懲罰
-- `failure_penalty`：timeout 且無觸碰、非 died/非 far_away 時懲罰
-
-總獎勵為上述分量總和。
-
-### 目前 Vehicle Base 參數（關鍵）
-（見 `drone_env_target_touch_vehicle_cfg.py`）
-- `lin_vel_reward_scale = 0.0`
-- `ang_vel_reward_scale = 0.0`
-- `distance_to_goal_reward_scale = 10.0`
-- `distance_to_goal_tanh_scale` 預設沿 base（0.8），Stage1 明確也是 0.8
-- `approach_reward_scale = 0.1`
-- `tcmd_lambda_4 = 1e-3`
-- `tcmd_lambda_5 = 1e-4`
-- `touch_bonus_reward = 100.0`
-- `time_penalty_scale = 0.15`
-- `distance_penalty_scale = 0.1`
-- `distance_penalty_only_when_not_approaching = True`
-- `death_penalty = 100.0`
-- `tilt_forward_reward_scale = 0.0`
+目前 `Stage3TestEnvCfg` 和 `Stage3EnvCfg` 保持一致，不再另外覆寫。
 
 ---
 
-## 5) 終止條件（Target Touch 系列）
+## 7. 目標物是怎麼移動的
 
-`drone_env_target_touch.py::_get_dones`：
-- `time_out`：episode 步數到上限
-- `died`：
-  - 高度低於 `died_height_threshold` 或
-  - 接地判定（若啟用 ground contact）
-- `far_away`：距離大於 `far_away_termination_distance`
-- `touched`：距離小於觸碰門檻（`touch_radius + body_sphere + margin`）
+`Vehicle-Moving` 的 moving target 更新邏輯在：
 
-`terminated = died | far_away | touched(可選)`。
+- [`/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/drone_env_target_touch_vehicle_moving.py`](/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/drone_env_target_touch_vehicle_moving.py)
 
----
+核心機制：
 
-## 6) 重生規則（Target Touch 系列）
+- 每步重算「目標相對於無人機」的方向
+- 目標會朝某個方向持續移動
+- z 軸可加正弦波
+- 高度超出上下限會被夾回範圍內
 
-`_reset_idx_impl` 主要流程：
-1. 重置無人機狀態。
-2. 依 `spawn_xy_min/max`, `spawn_z_min/max` 取樣無人機重生點。
-3. 若設定 `target_spawn_distance_min/max`，目標以「無人機為圓心」取樣：
-   - 先取 `theta ~ U(0, 2π)`
-   - 再取半徑 `r ~ U(min, max)`
-   - `target_xy = drone_xy + r * [cos(theta), sin(theta)]`
-4. 目標高度 `z` 在指定範圍取樣。
+常見參數：
+
+- `moving_target_speed`
+- `moving_target_vertical_dir_scale`
+- `moving_target_turn_rate_limit`
+- `moving_target_no_instant_reverse`
+- `moving_target_z_wave_amplitude`
+- `moving_target_z_wave_period_s`
+- `moving_target_z_min/max`
 
 ---
 
-## 7) Moving/Vehicle-Faster 系列的目標移動規則
+## 8. Reward 函數怎麼看
 
-`drone_env_target_touch_moving.py::_update_moving_targets`：
-- 每步重算「目標遠離無人機」方向。
-- 方向 z 分量乘 `moving_target_vertical_dir_scale`。
-- 可選限制：
-  - `moving_target_no_instant_reverse`
-  - `moving_target_turn_rate_limit`
-- 速度：`moving_target_speed`。
-- 可加 z 正弦波：
-  - `moving_target_z_wave_amplitude`
-  - `moving_target_z_wave_period_s`
-- 目標 z 超界會反射回 `moving_target_z_min/max`。
+`Vehicle-Moving` 沒有自己獨立寫一套 reward，而是共用：
 
-### 目前速度分級（重要）
-- Moving: `1.0`
-- Moving-Fast: `2.0`
-- Vehicle-Faster: `5.0`
-- Vehicle-VeryFast: `10.0`
-- Vehicle-UltraFast: `15.0`
+- [`/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/drone_env_target_touch.py`](/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/drone_env_target_touch.py)
+
+最重要的函式是：
+
+- `_get_rewards`
+- `_get_dones`
+- `_reset_idx_impl`
+
+### 8.1 目前主要 reward 項
+
+對 `Vehicle-Moving` 來說，最重要的是這幾項：
+
+1. `distance_to_goal`
+用途：
+- 距離目標越近，reward 越高
+
+公式：
+- `distance_to_goal_mapped = 1 - tanh(distance / distance_to_goal_tanh_scale)`
+- 再乘 `distance_to_goal_reward_scale * step_dt`
+
+2. `approach_reward`
+用途：
+- 朝目標方向飛行時給正獎勵
+
+公式：
+- `approach_speed = dot(v_body, goal_dir_body)`
+- `reward = approach_reward_scale * max(approach_speed, 0) * step_dt`
+
+3. `progress_reward`
+用途：
+- 這一步比上一步更接近目標，就給正獎勵
+- 如果變遠，這項就變成負值
+
+公式：
+- `progress = prev_distance - current_distance`
+- `reward = progress_reward_scale * progress`
+
+4. `touch_bonus`
+用途：
+- 碰到目標時給一次性大獎勵
+
+5. `touch_early_bonus`
+用途：
+- 越早碰到，額外加分越多
+
+6. `time_penalty`
+用途：
+- 每步固定扣分，逼策略不要拖太久
+
+7. `death_penalty`
+用途：
+- 撞地、掉太低、或某些 stage 下傾角超限時扣分
+
+8. `far_away_penalty`
+用途：
+- 離目標過遠時扣分
+
+9. `failure_penalty`
+用途：
+- timeout 但沒成功碰到，也不是 died/far-away 時扣分
+
+### 8.2 目前很多項是關閉的
+
+以下這些欄位雖然程式有算，但目前常常設為 0：
+
+- `speed_to_goal_reward_scale`
+- `distance_penalty_scale`
+- `near_touch_push_reward_scale`
+- `follow_behind_penalty_scale`
+- `tilt_forward_reward_scale`
+- `lin_vel_reward_scale`
+- `ang_vel_reward_scale`
+
+所以目前訓練主要還是靠：
+
+- `distance_to_goal`
+- `approach_reward`
+- `progress_reward`
+- `touch_bonus`
+- 各種終止/失敗懲罰
 
 ---
 
-## 8) Vehicle Stage 距離配置（目前）
+## 9. 終止條件怎麼看
 
-`drone_env_target_touch_vehicle_cfg.py`：
-- Stage0: `target_spawn_distance = [6, 10]`, `far_away=15`
-- Stage1: `target_spawn_distance = [15, 25]`, `far_away=30`
-- Stage2: `target_spawn_distance = [20, 40]`, `far_away=60`
-- Stage3: `target_spawn_distance = [20, 40]`, `far_away=60`
-- Stage4: `target_spawn_distance = [20, 40]`, `far_away=60`
-- Stage5: `target_spawn_distance = [25, 50]`, `far_away=70`
+終止條件也是看：
 
-備註：Stage3 的 docstring 文字目前寫 `[15, 30]`，但實際數值是 `[20, 40]`。
+- [`/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/drone_env_target_touch.py`](/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/drone_env_target_touch.py)
 
----
+主要幾種終止：
 
-## 9) Test 環境輸出與 TensorBoard 記錄
+- `time_out`：超過回合長度
+- `died_by_height`：高度太低
+- `ground_contact`：接地
+- `died_by_tilt`：傾角超限（只有啟用時才生效）
+- `far_away`：距離超過 `far_away_termination_distance`
+- `touched`：成功碰到目標
 
-## 9.1 Test console 輸出（Touch/Moving）
-- 成功數、成功率、平均成功步數
-- 重生距離摘要 `rd=...`
-- 重置原因摘要 `rsn=...`
-- Touch test 目前也會印 `reward=mean(min,max)`
-
-## 9.2 TensorBoard（Touch 系列）
-- `Episode_Reward/*`：每回合分量平均後再除以 episode 秒數
-- `Episode_RewardRaw/*`：每回合分量原始累積值
-- `Episode_Termination/*`
-- `Metrics/final_distance_to_goal`
-- 事件率：
-  - `Metrics/approaching_rate`
-  - `Metrics/touched_rate`
-  - `Metrics/far_away_rate`
-  - `Metrics/died_rate`
+目前 `Stage3` 訓練環境中，傾角限制是啟用的；測試環境也與訓練環境一致。
 
 ---
 
-## 10) 你常改的關鍵檔案（索引）
+## 10. 目前有哪些已訓練模型可用
 
-- 環境註冊：
-  - `source/Drone/Drone/tasks/direct/drone/__init__.py`
-- Touch 核心邏輯：
-  - `source/Drone/Drone/tasks/direct/drone/drone_env_target_touch.py`
-  - `source/Drone/Drone/tasks/direct/drone/drone_env_target_touch_cfg.py`
-- Vehicle stage 設定：
-  - `source/Drone/Drone/tasks/direct/drone/drone_env_target_touch_vehicle_cfg.py`
-- Moving 目標動態：
-  - `source/Drone/Drone/tasks/direct/drone/drone_env_target_touch_moving.py`
-  - `source/Drone/Drone/tasks/direct/drone/drone_env_target_touch_moving_cfg.py`
-  - `source/Drone/Drone/tasks/direct/drone/drone_env_target_touch_moving_fast_cfg.py`
-  - `source/Drone/Drone/tasks/direct/drone/drone_env_target_touch_moving_ladder_cfg.py`
-- Agent 訓練參數：
-  - `source/Drone/Drone/tasks/direct/drone/agents/*.yaml`
+看：
 
+- [`/home/jonas/Drone/Drone/docs/trained_models.md`](/home/jonas/Drone/Drone/docs/trained_models.md)
+
+這份檔案紀錄：
+
+- 目前有哪些 `best_agent.pt`
+- 每個模型的訓練階段
+- 它是從哪個 checkpoint fine-tune 來的
+- 當時實際訓練用的環境設定
+- 哪些模型可用、哪些模型失敗
+
+如果你想知道：
+
+- 「Stage2 是從哪個模型接著訓的？」
+- 「失敗的 Stage3 當時用的是 20~50 還是 20~100？」
+- 「某個模型訓練時目標速度是多少？」
+
+先看這個檔案最快。
+
+---
+
+## 11. 訓練、測試、播放要看哪些腳本
+
+最常用的是：
+
+- 訓練：
+  [`/home/jonas/Drone/Drone/scripts/skrl/train.py`](/home/jonas/Drone/Drone/scripts/skrl/train.py)
+- 播放 / 看 checkpoint：
+  [`/home/jonas/Drone/Drone/scripts/skrl/play.py`](/home/jonas/Drone/Drone/scripts/skrl/play.py)
+- 多 stage shell workflow：
+  [`/home/jonas/Drone/Drone/scripts/skrl/train_target_touch_vehicle_stages.sh`](/home/jonas/Drone/Drone/scripts/skrl/train_target_touch_vehicle_stages.sh)
+
+如果你只是想手動開某一階段訓練，通常直接用 `train.py` 就好。
+
+---
+
+## 12. tmux 自動接續訓練
+
+如果你現在用 tmux 跑長時間訓練，專案裡有一支小工具：
+
+- [`/home/jonas/Drone/Drone/scripts/tmux_run_after_pane_idle.sh`](/home/jonas/Drone/Drone/scripts/tmux_run_after_pane_idle.sh)
+
+作用是：
+
+- 監看某個 tmux pane
+- 等目前 `python` 結束
+- 自動送出下一條訓練指令
+
+這支腳本本身不綁定任何 task。  
+它會執行你啟動它時傳進去的那條指令。
+
+---
+
+## 13. 想查某個問題時，應該去哪裡
+
+### 13.1 想知道有哪些環境 ID
+
+看：
+- [`/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/__init__.py`](/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/__init__.py)
+
+### 13.2 想知道某個 stage 的設定
+
+看：
+- [`/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/drone_env_target_touch_vehicle_moving_cfg.py`](/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/drone_env_target_touch_vehicle_moving_cfg.py)
+
+### 13.3 想知道 reward / done / reset 怎麼算
+
+看：
+- [`/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/drone_env_target_touch.py`](/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/drone_env_target_touch.py)
+
+### 13.4 想知道 moving target 怎麼動
+
+看：
+- [`/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/drone_env_target_touch_vehicle_moving.py`](/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/drone_env_target_touch_vehicle_moving.py)
+
+### 13.5 想知道歷史模型與訓練鏈
+
+看：
+- [`/home/jonas/Drone/Drone/docs/trained_models.md`](/home/jonas/Drone/Drone/docs/trained_models.md)
+
+### 13.6 想知道某個舊模型當時用什麼設定訓的
+
+看對應 run 底下的：
+- `logs/skrl/<run>/params/env.yaml`
+
+這很重要：
+
+- 想知道「現在重新開訓會用什麼」：看目前 `cfg.py`
+- 想知道「某個舊模型當年實際用什麼訓」：看該 run 的 `params/env.yaml`
+
+這兩者不要混在一起看。
+
+---
+
+## 14. 建議第一次接手時的閱讀順序
+
+建議照這順序看：
+
+1. [`/home/jonas/Drone/README.md`](/home/jonas/Drone/README.md)
+2. [`/home/jonas/Drone/Drone/docs/trained_models.md`](/home/jonas/Drone/Drone/docs/trained_models.md)
+3. [`/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/__init__.py`](/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/__init__.py)
+4. [`/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/drone_env_target_touch_vehicle_moving_cfg.py`](/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/drone_env_target_touch_vehicle_moving_cfg.py)
+5. [`/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/drone_env_target_touch.py`](/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/drone_env_target_touch.py)
+6. [`/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/drone_env_target_touch_vehicle_moving.py`](/home/jonas/Drone/Drone/source/Drone/Drone/tasks/direct/drone/drone_env_target_touch_vehicle_moving.py)
+7. [`/home/jonas/Drone/Drone/scripts/skrl/train.py`](/home/jonas/Drone/Drone/scripts/skrl/train.py)
+
+照這個順序看，通常就能把：
+
+- 任務是什麼
+- 環境怎麼配
+- reward 怎麼算
+- checkpoint 怎麼接
+
+整體串起來。
