@@ -4,17 +4,49 @@
 
 ## 1. 檔案與責任分工
 
+目前已改成「系列內聚」結構：
+
+- `target_touch/`
+  - `env.py`：Target Touch 主環境
+  - `base_cfg.py`：Touch 共同基底設定
+  - `cfg.py`：相容性 facade，保留舊 import 路徑
+  - `reset_ops.py` / `observations.py` / `rewards.py` / `terminations.py`
+  - `scene_ops.py` / `debug_vis.py`
+- `target_touch_vehicle/`
+  - `env.py`：Vehicle 主環境
+  - `base_cfg.py`：Vehicle 共同基底設定
+  - `stage_cfgs.py`：Vehicle Stage0~Stage5 設定
+  - `curriculum.py`：Vehicle 專用課程與 reset hook
+- `target_touch_vehicle_moving/`
+  - `env.py`：Vehicle-Moving 主環境
+  - `base_cfg.py`：Vehicle-Moving 共同基底設定
+  - `stage_cfgs.py`：Vehicle-Moving Stage0~Stage5 / Test 設定
+  - `demo_cfgs.py`：台北 demo 設定
+  - `moving_target.py`：目標移動主流程
+  - `motion_sampling.py`：速度 / heading / turn 段長取樣
+  - `obstacle_ops.py`：場景障礙物避讓 / pushout
+  - `reset_ops.py`：moving reset 與 distance curriculum
+  - `test_mode.py`：測試模式 facade
+  - `test_visuals.py`：trail / debug 可視化
+  - `test_stats.py`：測試 done 與統計列印
+
+舊路徑仍保留為 facade，相容現有匯入與 Gym 註冊：
+
+- `drone_env_target_touch.py`
+- `drone_env_target_touch_cfg.py`
+- `drone_env_target_touch_vehicle.py`
+- `drone_env_target_touch_vehicle_cfg.py`
+- `drone_env_target_touch_vehicle_moving.py`
+- `drone_env_target_touch_vehicle_moving_cfg.py`
+
+其他尚未重構成系列目錄的檔案：
+
 - `drone_env_basic_cfg.py`：Basic 系列設定（場景、相機、獎勵、課程）
 - `drone_env_advanced_cfg.py`：Advanced 系列設定（多障礙等級）
-- `drone_env_target_touch_cfg.py`：Target Touch 舊系列基底設定
-- `drone_env_target_touch_vehicle_cfg.py`：Vehicle 新系列 Stage0~Stage2 設定
-- `drone_env_target_touch_vehicle_moving_cfg.py`：Vehicle-Moving 新系列 Stage0~Stage5 設定
 - `drone_env_target_touch_moving_cfg.py`：Moving 系列基底設定
 - `drone_env_target_touch_moving_fast_cfg.py`：Moving Fast 設定
 - `drone_env_target_touch_moving_ladder_cfg.py`：Moving 速度階梯（Faster/VeryFast/UltraFast）
-- `drone_env_target_touch.py`：Touch 核心環境邏輯（觀測、獎勵、終止、重置）
 - `drone_env_target_touch_moving.py`：Moving 目標動態邏輯（其餘沿用 touch）
-- `drone_env_target_touch_vehicle_moving.py`：Vehicle-Moving 新系列環境入口（沿用 moving 目標動態）
 - `__init__.py`：Gym 環境註冊與 env id 對應
 
 ## 2. 系列與環境 ID 對應

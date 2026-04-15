@@ -1,10 +1,38 @@
-# Python cache / local tooling noise
+# ==============================================================
+# 這個 repo 只追蹤以下內容：
+#   - source/
+#   - scripts/
+#   - example_env_sample_package/
+#   - 根目錄 *.md 檔 (README.md, AGENTS.md, CLAUDE.md, note.md, env_setup_steps.md)
+#   - .gitignore
+# 其他全部 ignore
+# ==============================================================
+
+# 內層訓練 repo（clone 別人的，不做版控）
+/Drone/
+
+# 本地輸出與實驗產物
+/outputs/
+
+# AI 工具設定目錄（本地用，不進版控）
+/.agents/
+/.codex/
+
+# Python cache
 **/__pycache__/
 **/*.pyc
+**/*.pyo
 
-# Taipei demo USD assets are large imported scene files and textures.
-# Keep env code/config in git, but do not commit these heavyweight binaries.
+# Taipei demo USD assets（大型二進位檔）
 /source/Drone/Drone/tasks/direct/drone/assets/Taipei_building_demo.usdc
 /source/Drone/Drone/tasks/direct/drone/assets/Taipei_demo_001.usd
 /source/Drone/Drone/tasks/direct/drone/assets/color.usd
 /source/Drone/Drone/tasks/direct/drone/assets/SubUSDs/
+
+# 其他常見雜項
+*.egg-info/
+*.egg
+.env
+.venv/
+dist/
+build/

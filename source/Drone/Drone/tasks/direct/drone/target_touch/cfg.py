@@ -2,6 +2,6 @@ from __future__ import annotations
 
 """Compatibility facade for the target-touch series config module."""
 
-from .target_touch.cfg import DroneTargetTouchEnvCfg, DroneTargetTouchEnvWindow
+from .base_cfg import DroneTargetTouchEnvCfg, DroneTargetTouchEnvWindow
 
 __all__ = ["DroneTargetTouchEnvCfg", "DroneTargetTouchEnvWindow"]
